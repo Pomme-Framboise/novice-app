@@ -573,8 +573,7 @@ async function afficherConversation() {
   const m = $("#msgs"); if (!m) return;
   const c = await conversation();
   m.innerHTML = c.slice(-12).map(x => `<div class="msg moi">${esc(x.q)}</div>` + (x.r
-    ? `<div class="msg novice">${esc(x.r).replace(/
-/g, "<br>")}${(x.sources || []).length ? `<div class="sources" style="margin-top:6px">${x.sources.slice(0, 3).map(s => `<a href="${lien(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.titre || s.url)}</a>`).join("")}</div>` : ""}</div>`
+    ? `<div class="msg novice">${esc(x.r).replace(/\n/g, "<br>")}${(x.sources || []).length ? `<div class="sources" style="margin-top:6px">${x.sources.slice(0, 3).map(s => `<a href="${lien(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.titre || s.url)}</a>`).join("")}</div>` : ""}</div>`
     : `<div class="msg novice attente">Je réfléchis… (1 à 2 minutes)</div>`)).join("");
 }
 async function poser(question) {
