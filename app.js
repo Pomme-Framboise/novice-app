@@ -1238,7 +1238,7 @@ function vueActions() {
     <div class="hd"><div><div class="over">Trade Republic · réel</div><h1>Mes actions</h1></div><button class="scanbtn" id="btnAchat">+ Achat</button></div>
     ${ouvertes.length ? ouvertes.map(p => { const v = p.verdict || {};
       return `<div class="card" style="margin-top:14px">
-        <div class="row"><div class="row" style="gap:12px;justify-content:flex-start"><div class="logo">${esc(p.ticker)}</div><div><b style="font-size:16px">${esc(p.nom || p.ticker)}</b><div class="over" style="font-size:12px">acheté ${nb(p.prix, 2)} le ${dateFr(p.date_achat)}${v.seances ? " · séance " + v.seances : ""}</div></div></div>
+        <div class="row"><div class="row" style="gap:12px;justify-content:flex-start"><div class="logo">${esc(p.ticker)}</div><div><b style="font-size:16px">${esc(p.nom || p.ticker)}</b><div class="over" style="font-size:12px">acheté ${p.prix_eur ? nb(p.prix_eur, 2) + " €" : nb(p.prix, 2)} le ${dateFr(p.date_achat)}${v.seances ? " · séance " + v.seances : ""}</div></div></div>
           <b class="${classe(v.dernier_cours / p.prix - 1)}" style="font-size:17px">${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) : "—"}</b></div>
         <div class="verdict v-${esc(v.verdict)}"><span class="ic"></span><div><b>${esc(v.verdict || "?")}</b><span>${esc(v.raison || "")}</span></div></div>
         <div class="levels"><div><b>${nb(v.niveau_vente, 2)}</b><span>niveau de vente</span></div><div><b>${nb(v.stop, 2)}</b><span>stop 4 ATR</span></div><div><b>${pct(v.marge_avant_sortie_pct)}</b><span>marge avant sortie</span></div></div>
