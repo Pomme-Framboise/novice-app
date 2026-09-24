@@ -938,7 +938,8 @@ function mouvements() {
   return [
     ...(nov.achats_maintenant || []).map(t => { const p = (D.novice.positions || []).find(x => x.ticker === t && x.etat !== "vendue") || {};
       return ligne(t, `acheté ${p.prix_entree ? "à " + nb(p.prix_entree, 2) : "en séance"} · 300 €`, '<span class="chip in">Achat</span>'); }),
-    ...(nov.achats_demain || []).map(t => ligne(t, "achat à l'ouverture suivante · 300 €", '<span class="chip in">Achat</span>')),
+    ...(nov.achats_demain || []).map(t => { const p = (D.novice.positions || []).find(x => x.ticker === t && x.etat !== "vendue") || {};
+      return ligne(t, p.prix_entree ? `acheté à ${nb(p.prix_entree, 2)} à l'ouverture du ${dateFr(p.date_entree)} · 300 €` : "achat à l'ouverture suivante · 300 €", '<span class="chip in">Achat</span>'); }),
     ...(nov.ventes_demain || []).map(t => ligne(t, "deuxième clôture sous le niveau de vente", '<span class="chip out">Vente</span>'))];
 }
 
