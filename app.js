@@ -32,8 +32,8 @@ const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", 
 const JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 const dateLongue = d => `${JOURS[d.getDay()]} ${d.getDate()} ${MOIS[d.getMonth()]}`;
 const NOMS = {novice: "Novice", calc: "Calculateur de hausse", calc10: "Calculateur, vente à +10 %", n1: "N°1 du scan", tech: "Top 10 technique seul",
-              v15: "Vente à +15 %", hasard: "Hasard", indice: "Indice"};
-const COULEURS = {calc: "#5B8DEF", calc10: "#9DB7F2", n1: "#2BA39B", tech: "#8E6BD8", v15: "#E07A5F", hasard: "--grey", indice: "--dash"};
+              v15: "Vente à +15 %", hasard: "Hasard", indice: "Indice", ana: "Filtre analystes 30 j", presse: "Filtre presse euphorique"};
+const COULEURS = {calc: "#5B8DEF", calc10: "#9DB7F2", ana: "#C98BB9", presse: "#7FA36B", n1: "#2BA39B", tech: "#8E6BD8", v15: "#E07A5F", hasard: "--grey", indice: "--dash"};
 const TEMOINS = ["hasard", "indice"];
 const col = c => c.startsWith("--") ? css(c) : c;
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -776,6 +776,12 @@ function fiche(t) {
       <div class="over" style="font-size:12.5px;margin-top:8px">${esc(g.motif)}</div></div>
       <div class="card">${Q.map(([k, l]) => { const q = g.questions[k] || {}; return `<div class="q6 tappable" data-why><span class="n">${k}</span><span class="l">${l}<small class="why" hidden>${esc(q.detail)}</small></span><span class="p">${nb(q.points, 0)}<span class="muted" style="font-weight:500"> / ${q.max}</span></span></div>`; }).join("")}</div>
       <div class="foot" style="margin-top:-4px">Touche une question pour lire sa justification.${lec.modele ? ` Lecture de l'actualité : ${esc(lec.modele === "claude" ? "Claude, avec recherche web" : lec.modele)}.` : ""}</div>` : ""}
+    ${(() => { const p = ((D.filtres || {}).presse || {})[t], an = ((D.filtres || {}).analystes || {})[t];
+      if (!p && !an) return "";
+      return `<h2>Filtres du Labo</h2><div class="card">
+        ${p ? `<div class="row"><span>Presse sur 5 jours</span><b class="${p.euphorique ? "warn" : ""}">${p.articles_5j} articles${p.ton_moyen != null ? ", ton " + nb(p.ton_moyen, 1) : ""}${p.euphorique ? " · euphorique" : ""}</b></div>` : ""}
+        ${an ? `<div class="row" style="margin-top:8px"><span>Objectifs d'analystes, 30 jours</span><b class="${an.baisse ? "down" : "up"}">${an.baisse ? "baisse" : "aucune baisse"}</b></div>${an.detail.length ? `<div class="over" style="font-size:12px;margin-top:4px">${an.detail.map(esc).join(" · ")}</div>` : ""}` : ""}
+      </div>`; })()}
     ${(lec.sources || []).length ? `<h2>Sources lues</h2><div class="card sources">${lec.sources.slice(0, 12).map(x => `<a href="${lien(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.titre || x.url)}</a>`).join("")}</div>` : ""}
     ${((D.actus || {})[t] || []).length ? `<h2>Actus</h2><div class="list news">${D.actus[t].map(a => `<a class="li" href="${lien(a.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit"><div class="t"><span class="kind">${esc(a.source || "")}</span><b>${esc(a.titre)}</b><span>${dateFr(a.date)}</span></div></a>`).join("")}</div>` : ""}`;
   ouvrir("fiche");
