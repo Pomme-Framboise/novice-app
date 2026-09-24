@@ -283,6 +283,12 @@ function afficher() {
     <nav class="tabs">${Object.keys(ICONES).map(k => `<button class="tab${k === "accueil" ? " on" : ""}" data-v="${k}">${k === "actions" && alerte ? '<span class="dot"></span>' : ""}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONES[k]}</svg>${LIBELLES[k]}</button>`).join("")}</nav>`;
   vueAccueil(); vueNovice(); vueMarches(); vueActions(); vueLabo();
   $$(".tab").forEach(t => t.onclick = () => aller(t.dataset.v));
+  // Lien direct vers la case du jeton GitHub : …/novice-app/#github
+  if (location.hash === "#github") {
+    history.replaceState(null, "", location.pathname);
+    aller("novice"); ouvrir("reglages");
+    setTimeout(() => { const c = $("#blocGithub"); if (c) c.scrollIntoView({block: "center"}); const champ = $("#champJeton"); if (champ) champ.focus(); }, 500);
+  }
 }
 
 function aller(v) {
