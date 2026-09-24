@@ -178,7 +178,7 @@ async function demarrer() {
 }
 
 function ecranConnexion(message = "") {
-  $("#app").innerHTML = `<form class="connexion" id="formCo" autocomplete="off">
+  $("#app").innerHTML = `<form class="connexion" id="formCo">
     <div class="avatar lg">N</div>
     <h1>Novice</h1>
     <div class="over">Ta méthode, appliquée chaque soir.</div>
