@@ -525,7 +525,7 @@ async function reprendreSuivi() {
   if (s && Date.now() - new Date(s.depuis) < 90 * 60000) return suivre(s.workflow, new Date(s.depuis), s.message, s.runId);
   try {
     for (const w of ["soir.yml", "publier.yml"]) {
-      const run = ((await gh(`/actions/workflows/${w}/runs?per_page=3`)).workflow_runs || []).find(r => r.status !== "completed");
+      const run = ((await gh(`/actions/workflows/${w}/runs?per_page=3`)).workflow_runs || []).find(r => r.status !== "completed" && !(w === "publier.yml" && r.event === "schedule"));
       if (run) return suivre(w, new Date(run.created_at), w === "publier.yml" ? "Mise à jour"
         : run.event === "schedule" ? "Calcul du soir" : "Scan", run.id);
     }
@@ -587,7 +587,7 @@ async function achat() {
     <label class="champ"><span>Nom (facultatif)</span><input id="nm"></label>
     <div class="champs2"><label class="champ"><span>Date d'achat</span><input id="dt" type="date" value="${aujourdhui()}"></label>
       <label class="champ"><span>Montant (€)</span><input id="mt" inputmode="decimal" value="300"></label></div>
-    <label class="champ"><span>Prix payé par action, dans la devise de cotation</span><input id="px" inputmode="decimal"></label>
+    <label class="champ"><span>Prix payé par action, en €, tel qu'affiché par Trade Republic</span><input id="px" inputmode="decimal"></label>
     <div class="erreur" id="err"></div>
     <button class="btn" id="ok">Enregistrer</button><button class="btn sec" data-annuler>Annuler</button>`);
   f.querySelector("#tk").oninput = e => { const t = e.target.value.trim().toUpperCase(); if (!f.querySelector("#nm").value && nomDe(t) !== t) f.querySelector("#nm").value = nomDe(t); };
@@ -598,12 +598,15 @@ async function achat() {
     if (!/^[A-Z0-9^.\-]{1,15}$/.test(ticker)) return err.textContent = "Code de l'action invalide.";
     if (!(prix > 0) || !(montant > 0) || !date) return err.textContent = "Prix, montant et date sont obligatoires.";
     const [place, devise] = placeDe(ticker);
+    // Prix en euros : converti par le robot au change du jour d'achat pour les
+    // titres cotés dans une autre devise.
+    const prixSaisi = devise === "EUR" ? {prix, prix_eur: prix} : {prix_eur: prix};
     f.querySelector("#ok").disabled = true; f.querySelector("#ok").textContent = "Enregistrement…";
     try {
       const {sha, mes} = await lireMesPositions();
       if ((mes.ouvertes || []).some(p => p.ticker === ticker)) throw new Error(`${ticker} est déjà dans tes positions`);
       mes.ouvertes = [...(mes.ouvertes || []), {ticker, nom: f.querySelector("#nm").value.trim() || ticker, place, devise,
-                                                date_achat: date, prix, montant}];
+                                                date_achat: date, ...prixSaisi, montant}];
       const depuis = new Date(Date.now() - 5000);
       await ecrireMesPositions(mes, sha, `Achat de ${ticker} enregistré depuis l'appli`);
       fermer();
@@ -621,7 +624,7 @@ async function vente(ticker) {
   const {f, fermer} = feuille(`<h3>J'ai vendu ${esc(p.nom || ticker)}</h3>
     <p>Verdict de Novice ce soir : <b>${esc(v.verdict || "?")}</b>${v.raison ? " (" + esc(v.raison) + ")" : ""}. Il comparera ta vente à ce que dit la règle.</p>
     <div class="champs2"><label class="champ"><span>Date de vente</span><input id="dt" type="date" value="${aujourdhui()}"></label>
-      <label class="champ"><span>Prix de vente</span><input id="px" inputmode="decimal" value="${v.dernier_cours ? nb(v.dernier_cours, 2) : ""}"></label></div>
+      <label class="champ"><span>Prix de vente par action${p.prix_eur ? " en €" : ""}</span><input id="px" inputmode="decimal" value="${v.dernier_cours && (!p.prix_eur || p.devise === "EUR") ? nb(v.dernier_cours, 2) : ""}"></label></div>
     <label class="champ"><span>Gain réel en € affiché par Trade Republic (facultatif, sinon estimé)</span><input id="ge" inputmode="decimal"></label>
     <label class="champ"><span>Pourquoi ? (facultatif)</span><input id="mo" placeholder="signal de sortie, besoin du capital…"></label>
     <div class="erreur" id="err"></div>
@@ -635,10 +638,11 @@ async function vente(ticker) {
       const {sha, mes} = await lireMesPositions();
       const pos = (mes.ouvertes || []).find(x => x.ticker === ticker);
       if (!pos) throw new Error("position introuvable, recharge l'appli");
-      const brut = (prixVente / pos.prix - 1) * 100;
+      // Même unité que l'achat : euros si le prix d'achat a été saisi en euros.
+      const brut = (prixVente / (pos.prix_eur || pos.prix) - 1) * 100;
       const gainEur = isNaN(gainSaisi) ? pos.montant * brut / 100 - 2 : gainSaisi;
       mes.ouvertes = mes.ouvertes.filter(x => x.ticker !== ticker);
-      mes.ventes = [...(mes.ventes || []), {...pos, date_vente: date, prix_vente: prixVente,
+      mes.ventes = [...(mes.ventes || []), {...pos, date_vente: date, prix_vente: prixVente, ...(pos.prix_eur ? {prix_vente_eur: prixVente} : {}),
         motif: f.querySelector("#mo").value.trim() || "vente depuis l'appli",
         gain_pct: Math.round(gainEur / pos.montant * 10000) / 100, gain_eur: Math.round(gainEur * 100) / 100,
         gain_estime: isNaN(gainSaisi), verdict_du_soir: v.verdict || null}];
