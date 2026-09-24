@@ -181,6 +181,24 @@ async function demarrer() {
   ecranConnexion();
 }
 
+// Données fraîches pendant que l'appli est ouverte : le robot republie toutes
+// les 30 minutes en séance ; l'appli regarde toutes les 5 minutes et à chaque
+// retour au premier plan. Jamais pendant une saisie ou une page ouverte.
+async function rafraichir() {
+  if (!CLE || !D || suiviActif || document.querySelector(".verrou, .point, .feuille, .sub.open")) return;
+  if (["INPUT", "TEXTAREA"].includes((document.activeElement || {}).tagName)) return;
+  try {
+    const neuf = await dechiffrer(CLE, await chargerPaquet());
+    if (neuf.publie_le === D.publie_le) return;
+    const onglet = ((document.querySelector(".tab.on") || {}).dataset || {}).v || "accueil";
+    const defil = ($("#v-" + onglet) || {}).scrollTop || 0;
+    D = neuf; afficher(); aller(onglet); $("#v-" + onglet).scrollTop = defil;
+    pointDuSoir();
+  } catch (e) {}
+}
+setInterval(rafraichir, 5 * 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") rafraichir(); });
+
 // Une fois l'appli ouverte : le point du soir s'il est nouveau, puis la
 // reprise du suivi d'un calcul en cours (lancé d'ici ou par l'horloge du soir).
 function apresOuverture() {
@@ -954,7 +972,7 @@ function vueAccueil() {
   const mv = mouvements();
 
   $("#v-accueil").innerHTML = `
-    <div class="hd"><div><div class="over">${dateLongue(maintenant)}</div><h1>Aujourd'hui</h1></div>
+    <div class="hd"><div><div class="over">${dateLongue(maintenant)}${D.publie_le ? ` · cours de ${heureDe(D.publie_le)}` : ""}</div><h1>Aujourd'hui</h1></div>
       <button class="gear" data-open="appli" aria-label="Réglages de l'appli">${ROUE}</button></div>
     ${vieux ? `<div class="bandeau" style="margin-top:12px">Le calcul du soir n'a pas tourné depuis le ${dateFr(r.genere_le)}. Les chiffres ci-dessous datent de ce jour-là.</div>` : ""}
     ${genere ? `<div class="list tappable" id="ouvrirPoint" style="margin-top:14px"><div class="li sans-logo"><div class="t"><b>${titrePoint(r)}</b><span>${dateFr(r.genere_le)} à ${heureDe(r.genere_le)}${r.provisoire ? " · pendant la séance" : ""}</span></div><span class="chev">›</span></div></div>` : ""}
@@ -1169,7 +1187,7 @@ function vueMarches() {
 
 // Titre d'article traduit en français par Claude (ou Gemini) pendant la lecture
 // des actus ; titre d'origine si la traduction manque.
-function titreFr(t, i, a) { const tr = ((D.lectures || {})[t] || {}).titres_fr; return (Array.isArray(tr) && tr[i]) || a.titre; }
+function titreFr(t, i, a) { return (D.traductions || {})[a.titre] || a.titre; }
 
 // ------------------------------------------------------------------ Fiche titre
 function fiche(t) {
