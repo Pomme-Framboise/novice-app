@@ -970,7 +970,7 @@ function vueMarches() {
   const compte = c => regimes.filter(([, v]) => v === c).length;
   const dominant = ["ROUGE", "ORANGE", "VERT"].find(c => r.regimes && r.regimes["^GSPC"] === c) || "VERT";
   const statutChip = s => s === "conditions réunies" ? "in" : s === "sous surveillance" ? "al" : "neutre";
-  const actus = Object.entries(D.actus || {}).flatMap(([t, l]) => (l || []).map(a => ({...a, ticker: t})))
+  const actus = Object.entries(D.actus || {}).flatMap(([t, l]) => (l || []).map((a, i) => ({...a, ticker: t, titre: titreFr(t, i, a)})))
     .sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 40);
   $("#v-marches").innerHTML = `
     <div class="hd"><div><div class="over">Scan du ${dateFr(r.date_scan)}${r.provisoire ? " · provisoire" : ""}</div><h1>Marchés</h1></div><button class="scanbtn" id="btnScan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Scanner</button></div>
@@ -992,6 +992,10 @@ function vueMarches() {
   segments($("#v-marches"), ["mk-sig", "mk-act"]);
   $("#btnScan").onclick = scanner;
 }
+
+// Titre d'article traduit en français par Claude (ou Gemini) pendant la lecture
+// des actus ; titre d'origine si la traduction manque.
+function titreFr(t, i, a) { const tr = ((D.lectures || {})[t] || {}).titres_fr; return (Array.isArray(tr) && tr[i]) || a.titre; }
 
 // ------------------------------------------------------------------ Fiche titre
 function fiche(t) {
@@ -1021,7 +1025,7 @@ function fiche(t) {
         ${an ? `<div class="row" style="margin-top:8px"><span>Objectifs d'analystes, 30 jours</span><b class="${an.baisse ? "down" : "up"}">${an.baisse ? "baisse" : "aucune baisse"}</b></div>${an.detail.length ? `<div class="over" style="font-size:12px;margin-top:4px">${an.detail.map(esc).join(" · ")}</div>` : ""}` : ""}
       </div>`; })()}
     ${(lec.sources || []).length ? `<h2>Sources lues</h2><div class="card sources">${lec.sources.slice(0, 12).map(x => `<a href="${lien(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.titre || x.url)}</a>`).join("")}</div>` : ""}
-    ${((D.actus || {})[t] || []).length ? `<h2>Actus</h2><div class="list news">${D.actus[t].map(a => `<a class="li" href="${lien(a.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit"><div class="t"><span class="kind">${esc(a.source || "")}</span><b>${esc(a.titre)}</b><span>${dateFr(a.date)}</span></div></a>`).join("")}</div>` : ""}`;
+    ${((D.actus || {})[t] || []).length ? `<h2>Actus</h2><div class="list news">${D.actus[t].map((a, i) => `<a class="li" href="${lien(a.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit"><div class="t"><span class="kind">${esc(a.source || "")}</span><b>${esc(titreFr(t, i, a))}</b><span>${dateFr(a.date)}</span></div></a>`).join("")}</div>` : ""}`;
   ouvrir("fiche");
   const svg = $("#courbeFiche");
   if (svg) traceLignes(svg, [{d: cours.map(c => c[1]), c: css("--accent"), w: 2.2}, {d: cours.map(c => c[2]), c: css("--warn"), dash: 1}], 316, 148);
