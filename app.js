@@ -123,11 +123,11 @@ function ecranVerrou(suite) {
   cache.innerHTML = `<div class="connexion"><div class="avatar lg">N</div><h1>Novice</h1><div class="over">Verrouillée</div>
     <button class="btn" id="btnFace">Déverrouiller avec Face ID</button>
     <div class="erreur" id="erreurFace"></div>
-    <div class="foot" style="margin:18px 0 0;text-align:center"><a href="#" id="parPhrase">Utiliser la phrase de passe</a></div></div>`;
+    <div class="foot" style="margin:18px 0 0;text-align:center"><a href="#" id="parPhrase">Utiliser le mot de passe</a></div></div>`;
   document.body.appendChild(cache);
   const essayer = async () => {
     try { await verifierFaceId(); cache.remove(); suite && suite(); }
-    catch (e) { $("#erreurFace").textContent = "Face ID n'a pas abouti. Réessaie ou utilise la phrase de passe."; }
+    catch (e) { $("#erreurFace").textContent = "Face ID n'a pas abouti. Réessaie ou utilise le mot de passe."; }
   };
   cache.querySelector("#btnFace").onclick = essayer;
   cache.querySelector("#parPhrase").onclick = ev => { ev.preventDefault(); cache.remove(); oublier().then(() => ecranConnexion()); };
@@ -147,7 +147,7 @@ function proposerFaceId() {
   const cache = document.createElement("div");
   cache.className = "verrou";
   cache.innerHTML = `<div class="connexion"><div class="avatar lg">N</div><h1>Face ID</h1>
-    <div class="bubble" style="margin-top:10px">Verrouiller Novice avec Face ID à chaque ouverture et après 15 minutes sans t'en servir ? Tu n'auras plus à taper ta phrase pendant 30 jours.</div>
+    <div class="bubble" style="margin-top:10px">Verrouiller Novice avec Face ID à chaque ouverture et après 15 minutes sans t'en servir ? Tu n'auras plus à taper ton mot de passe pendant 30 jours.</div>
     <button class="btn" id="oui">Activer Face ID</button><div class="erreur" id="erreurFace"></div>
     <div class="foot" style="margin:18px 0 0;text-align:center"><a href="#" id="non">Plus tard</a></div></div>`;
   document.body.appendChild(cache);
@@ -182,7 +182,7 @@ function ecranConnexion(message = "") {
     <div class="avatar lg">N</div>
     <h1>Novice</h1>
     <div class="over">Ta méthode, appliquée chaque soir.</div>
-    <input type="password" id="phrase" placeholder="Phrase de passe" autocomplete="current-password" autofocus>
+    <input type="password" id="phrase" placeholder="Mot de passe" autocomplete="current-password" autofocus>
     <label class="memo"><input type="checkbox" id="memo" checked> Rester connecté 30 jours sur cet appareil</label>
     <div class="erreur" id="erreur">${esc(message)}</div>
     <button class="btn" id="btnCo">Ouvrir</button>
@@ -202,7 +202,7 @@ function ecranConnexion(message = "") {
       bouton.disabled = false; bouton.textContent = "Ouvrir";
       $("#erreur").textContent = e.message === "données introuvables"
         ? "Données introuvables : le calcul du soir n'a pas encore été publié."
-        : "Phrase de passe incorrecte.";
+        : "Mot de passe incorrect.";
     }
   };
 }
