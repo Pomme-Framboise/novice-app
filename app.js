@@ -182,7 +182,8 @@ function ecranConnexion(message = "") {
     <div class="avatar lg">N</div>
     <h1>Novice</h1>
     <div class="over">Ta méthode, appliquée chaque soir.</div>
-    <input type="password" id="phrase" placeholder="Mot de passe" autocomplete="current-password" autofocus>
+    <input type="text" name="username" value="antoine" autocomplete="username" hidden aria-hidden="true">
+    <input type="password" id="phrase" name="password" placeholder="Mot de passe" autocomplete="current-password" autofocus>
     <label class="memo"><input type="checkbox" id="memo" checked> Rester connecté 30 jours sur cet appareil</label>
     <div class="erreur" id="erreur">${esc(message)}</div>
     <button class="btn" id="btnCo">Ouvrir</button>
