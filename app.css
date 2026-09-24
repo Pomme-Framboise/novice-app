@@ -146,3 +146,22 @@ h2 small{font-size:13px;font-weight:500;color:var(--gold);cursor:pointer}
 .chargement{display:grid;place-items:center;height:100%;color:var(--muted);font-size:14px}
 .verrou{position:fixed;inset:0;z-index:100;background:var(--bg);overflow:auto}
 .verrou .connexion{max-width:520px;margin:0 auto}
+
+/* Actions depuis l'appli */
+.scanbtn{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;border:0;border-radius:18px;padding:8px 13px;background:var(--gold-2);color:#141416;cursor:pointer;flex:none;white-space:nowrap}
+.scanbtn svg{width:16px;height:16px}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));max-width:488px;margin:0 auto;background:var(--ink);color:var(--bg);font-size:13.5px;line-height:1.4;padding:12px 14px;border-radius:14px;z-index:90;opacity:0;transform:translateY(10px);transition:all .25s}
+.toast.show{opacity:1;transform:none}
+.feuille-fond{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:80}
+.feuille{position:fixed;left:0;right:0;bottom:0;max-width:520px;margin:0 auto;max-height:90%;overflow:auto;background:var(--surface);border-radius:24px 24px 0 0;padding:10px 20px calc(24px + env(safe-area-inset-bottom));z-index:81}
+.feuille .poignee{width:38px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 14px}
+.feuille h3{margin:0 0 8px;font-size:19px}
+.feuille p{margin:0 0 8px;font-size:14px;line-height:1.45;color:var(--muted)}
+.feuille p b{color:var(--ink)}
+.btn.sec{background:var(--surface2);color:var(--gold);margin-top:8px}
+.champ{display:block;margin-top:12px}
+.champ span{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600}
+.champ input,.saisie{width:100%;font:inherit;font-size:16px;background:var(--surface2);border:1px solid transparent;border-radius:12px;padding:11px 12px;color:var(--ink);outline:none}
+.champ input:focus,.saisie:focus{border-color:var(--gold-2)}
+.champs2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.erreur{color:var(--down);font-size:13.5px;margin-top:10px;min-height:18px}

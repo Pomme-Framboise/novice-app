@@ -17,6 +17,7 @@ const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAl
 const JOUR_MS = 86400000;
 const CAPITAL = 300;
 let D = null;          // le paquet de données déchiffré
+let CLE = null;        // la clé tirée du mot de passe, en mémoire le temps de la session
 
 // ------------------------------------------------------------------ outils
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -41,7 +42,7 @@ const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 async function deriverCle(phrase, sel, tours) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(phrase.trim()), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({name: "PBKDF2", hash: "SHA-256", salt: sel, iterations: tours},
-                                 base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+                                 base, {name: "AES-GCM", length: 256}, false, ["encrypt", "decrypt"]);
 }
 
 async function dechiffrer(cle, paquet) {
@@ -169,6 +170,7 @@ async function demarrer() {
   if (cle) {
     try {
       D = await dechiffrer(cle, await chargerPaquet());
+      CLE = cle;
       afficher();
       if (await sortir("faceid")) ecranVerrou();
       return;
@@ -195,6 +197,7 @@ function ecranConnexion(message = "") {
       const paquet = await chargerPaquet();
       const cle = await deriverCle($("#phrase").value, b64(paquet.sel), paquet.tours);
       D = await dechiffrer(cle, paquet);
+      CLE = cle;
       const garder = $("#memo").checked;
       if (garder) await memoriser(cle);
       afficher();
@@ -308,6 +311,223 @@ function segments(conteneur, onglets, choix) {
   });
 }
 
+// ------------------------------------------------------------------ GitHub : l'appli agit
+// Un « jeton » GitHub à accès limité (dépôt privé novice seulement : contenu
+// et lancement du calcul) permet à l'appli d'enregistrer tes achats et ventes
+// et de lancer un scan. Il est gardé sur ce téléphone, chiffré avec la clé de
+// ton mot de passe, et n'est jamais publié.
+const DEPOT = "Pomme-Framboise/novice";
+async function jeton() {
+  const j = await sortir("jeton");
+  if (!j || !CLE) return null;
+  try {
+    const clair = await crypto.subtle.decrypt({name: "AES-GCM", iv: j.iv}, CLE, j.donnees);
+    return new TextDecoder().decode(clair);
+  } catch (e) { return null; }
+}
+async function rangerJeton(valeur) {
+  const iv = aleatoire(12);
+  const donnees = await crypto.subtle.encrypt({name: "AES-GCM", iv}, CLE, new TextEncoder().encode(valeur.trim()));
+  await ranger("jeton", {iv, donnees});
+}
+async function gh(chemin, options = {}) {
+  const j = await jeton();
+  if (!j) throw new Error("sans jeton");
+  const r = await fetch(`https://api.github.com/repos/${DEPOT}${chemin}`, {...options, headers: {
+    Authorization: `Bearer ${j}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+    ...(options.body ? {"Content-Type": "application/json"} : {})}});
+  if (r.status === 401) throw new Error("jeton refusé");
+  if (!r.ok && r.status !== 204) throw new Error(`GitHub a répondu ${r.status}`);
+  return r.status === 204 ? null : r.json();
+}
+const versB64 = t => { const o = new TextEncoder().encode(t); let b = ""; o.forEach(x => b += String.fromCharCode(x)); return btoa(b); };
+const depuisB64 = t => new TextDecoder().decode(Uint8Array.from(atob(t.replace(/\n/g, "")), c => c.charCodeAt(0)));
+async function lireMesPositions() {
+  const f = await gh("/contents/donnees/mes_positions.json?ref=main");
+  return {sha: f.sha, mes: JSON.parse(depuisB64(f.content))};
+}
+async function ecrireMesPositions(mes, sha, message) {
+  await gh("/contents/donnees/mes_positions.json", {method: "PUT", body: JSON.stringify({
+    message, sha, branch: "main", content: versB64(JSON.stringify(mes, null, 1) + "\n")})});
+}
+
+// Suivi d'un calcul lancé sur GitHub, puis rechargement des données publiées.
+async function suivre(workflow, depuis, message) {
+  const bandeau = $("#suivi") || document.body.appendChild(Object.assign(document.createElement("div"), {id: "suivi", className: "toast show"}));
+  bandeau.classList.add("show");
+  for (let i = 0; i < 90; i++) {
+    await new Promise(ok => setTimeout(ok, 15000));
+    let run;
+    try { run = ((await gh(`/actions/workflows/${workflow}/runs?per_page=5`)).workflow_runs || []).find(r => new Date(r.created_at) >= depuis); } catch (e) { continue; }
+    if (!run) { bandeau.textContent = `${message} : en file d'attente chez GitHub…`; continue; }
+    if (run.status !== "completed") {
+      let etape = "";
+      try { const jobs = await gh(`/actions/runs/${run.id}/jobs`); const e = (jobs.jobs[0].steps || []).find(x => x.status === "in_progress"); etape = e ? " · " + e.name : ""; } catch (e) {}
+      bandeau.textContent = `${message} : en cours${etape}`;
+      continue;
+    }
+    if (run.conclusion !== "success") { bandeau.textContent = `${message} : échec chez GitHub. Réessaie plus tard.`; setTimeout(() => bandeau.remove(), 8000); return; }
+    bandeau.textContent = "Terminé, mise à jour de l'appli…";
+    await new Promise(ok => setTimeout(ok, 45000));   // le temps que GitHub Pages serve la nouvelle version
+    try { D = await dechiffrer(CLE, await chargerPaquet()); afficher(); } catch (e) {}
+    bandeau.remove();
+    toast("Données à jour.");
+    return;
+  }
+  bandeau.textContent = `${message} : toujours en cours, reviens plus tard.`;
+}
+
+function toast(texte) {
+  const t = document.body.appendChild(Object.assign(document.createElement("div"), {className: "toast show", textContent: texte}));
+  setTimeout(() => t.remove(), 4000);
+}
+
+function feuille(html) {
+  const fond = document.body.appendChild(Object.assign(document.createElement("div"), {className: "feuille-fond"}));
+  const f = document.body.appendChild(Object.assign(document.createElement("div"), {className: "feuille", innerHTML: `<div class="poignee"></div>${html}`}));
+  const fermer = () => { fond.remove(); f.remove(); };
+  fond.onclick = fermer;
+  f.querySelectorAll("[data-annuler]").forEach(b => b.onclick = ev => { ev.preventDefault(); fermer(); });
+  return {f, fermer};
+}
+
+async function exigerJeton() {
+  if (await jeton()) return true;
+  toast("Connecte d'abord l'appli à GitHub : Novice › roue crantée › GitHub.");
+  return false;
+}
+
+async function scanner() {
+  if (!await exigerJeton()) return;
+  const {f, fermer} = feuille(`<h3>Lancer un scan maintenant ?</h3>
+    <p>Novice refait tout : cours des ~870 titres, classement, six questions lues par Claude. Compte 5 à 10 minutes.</p>
+    <p>Pendant la séance, c'est un <b>aperçu provisoire</b> : Novice n'achète et ne vend que sur le calcul du soir.</p>
+    <button class="btn" id="go">Lancer le scan</button><button class="btn sec" data-annuler>Annuler</button>`);
+  f.querySelector("#go").onclick = async () => {
+    fermer();
+    const depuis = new Date(Date.now() - 5000);
+    try {
+      await gh("/actions/workflows/soir.yml/dispatches", {method: "POST", body: JSON.stringify({ref: "main", inputs: {manuel: "true"}})});
+      suivre("soir.yml", depuis, "Scan");
+    } catch (e) { toast("Impossible de lancer le scan : " + e.message); }
+  };
+}
+
+const PLACES = {PA: ["Paris", "EUR"], AS: ["Amsterdam", "EUR"], BR: ["Bruxelles", "EUR"], LS: ["Lisbonne", "EUR"],
+                DE: ["Francfort", "EUR"], MI: ["Milan", "EUR"], MC: ["Madrid", "EUR"], L: ["Londres", "GBp"]};
+function placeDe(ticker) {
+  const suffixe = ticker.includes(".") ? ticker.split(".").pop() : "";
+  return PLACES[suffixe] || (suffixe ? ["?", "EUR"] : ["US", "USD"]);
+}
+const aujourdhui = () => new Date().toISOString().slice(0, 10);
+const nombre = v => parseFloat(String(v).replace(",", ".").replace(/\s/g, ""));
+
+async function achat() {
+  if (!await exigerJeton()) return;
+  const suggestions = [...new Set([...(R().short_list || []).map(t => t.ticker), ...(D.novice.positions || []).map(p => p.ticker)])];
+  const {f, fermer} = feuille(`<h3>J'ai acheté</h3>
+    <p>Novice calculera ton stop, ton niveau de vente et te donnera un verdict chaque soir.</p>
+    <label class="champ"><span>Action (code Yahoo : ANET, AIR.PA, RHM.DE…)</span><input id="tk" list="tks" autocapitalize="characters" autocomplete="off"><datalist id="tks">${suggestions.map(t => `<option value="${esc(t)}">${esc(nomDe(t))}</option>`).join("")}</datalist></label>
+    <label class="champ"><span>Nom (facultatif)</span><input id="nm"></label>
+    <div class="champs2"><label class="champ"><span>Date d'achat</span><input id="dt" type="date" value="${aujourdhui()}"></label>
+      <label class="champ"><span>Montant (€)</span><input id="mt" inputmode="decimal" value="300"></label></div>
+    <label class="champ"><span>Prix payé par action, dans la devise de cotation</span><input id="px" inputmode="decimal"></label>
+    <div class="erreur" id="err"></div>
+    <button class="btn" id="ok">Enregistrer</button><button class="btn sec" data-annuler>Annuler</button>`);
+  f.querySelector("#tk").oninput = e => { const t = e.target.value.trim().toUpperCase(); if (!f.querySelector("#nm").value && nomDe(t) !== t) f.querySelector("#nm").value = nomDe(t); };
+  f.querySelector("#ok").onclick = async () => {
+    const ticker = f.querySelector("#tk").value.trim().toUpperCase(), prix = nombre(f.querySelector("#px").value),
+          montant = nombre(f.querySelector("#mt").value), date = f.querySelector("#dt").value;
+    const err = f.querySelector("#err");
+    if (!/^[A-Z0-9^.\-]{1,15}$/.test(ticker)) return err.textContent = "Code de l'action invalide.";
+    if (!(prix > 0) || !(montant > 0) || !date) return err.textContent = "Prix, montant et date sont obligatoires.";
+    const [place, devise] = placeDe(ticker);
+    f.querySelector("#ok").disabled = true; f.querySelector("#ok").textContent = "Enregistrement…";
+    try {
+      const {sha, mes} = await lireMesPositions();
+      if ((mes.ouvertes || []).some(p => p.ticker === ticker)) throw new Error(`${ticker} est déjà dans tes positions`);
+      mes.ouvertes = [...(mes.ouvertes || []), {ticker, nom: f.querySelector("#nm").value.trim() || ticker, place, devise,
+                                                date_achat: date, prix, montant}];
+      const depuis = new Date(Date.now() - 5000);
+      await ecrireMesPositions(mes, sha, `Achat de ${ticker} enregistré depuis l'appli`);
+      fermer();
+      D.mes_positions.ouvertes = mes.ouvertes; vueActions();
+      toast(`${ticker} enregistré. Verdict dans 2 à 3 minutes.`);
+      suivre("publier.yml", depuis, "Calcul de tes niveaux");
+    } catch (e) { err.textContent = e.message; f.querySelector("#ok").disabled = false; f.querySelector("#ok").textContent = "Enregistrer"; }
+  };
+}
+
+async function vente(ticker) {
+  if (!await exigerJeton()) return;
+  const p = (D.mes_positions.ouvertes || []).find(x => x.ticker === ticker); if (!p) return;
+  const v = p.verdict || {};
+  const {f, fermer} = feuille(`<h3>J'ai vendu ${esc(p.nom || ticker)}</h3>
+    <p>Verdict de Novice ce soir : <b>${esc(v.verdict || "?")}</b>${v.raison ? " (" + esc(v.raison) + ")" : ""}. Il comparera ta vente à ce que dit la règle.</p>
+    <div class="champs2"><label class="champ"><span>Date de vente</span><input id="dt" type="date" value="${aujourdhui()}"></label>
+      <label class="champ"><span>Prix de vente</span><input id="px" inputmode="decimal" value="${v.dernier_cours ? nb(v.dernier_cours, 2) : ""}"></label></div>
+    <label class="champ"><span>Gain réel en € affiché par Trade Republic (facultatif, sinon estimé)</span><input id="ge" inputmode="decimal"></label>
+    <label class="champ"><span>Pourquoi ? (facultatif)</span><input id="mo" placeholder="signal de sortie, besoin du capital…"></label>
+    <div class="erreur" id="err"></div>
+    <button class="btn" id="ok">Enregistrer la vente</button><button class="btn sec" data-annuler>Annuler</button>`);
+  f.querySelector("#ok").onclick = async () => {
+    const prixVente = nombre(f.querySelector("#px").value), date = f.querySelector("#dt").value, err = f.querySelector("#err");
+    if (!(prixVente > 0) || !date) return err.textContent = "Prix et date de vente sont obligatoires.";
+    const gainSaisi = nombre(f.querySelector("#ge").value);
+    f.querySelector("#ok").disabled = true;
+    try {
+      const {sha, mes} = await lireMesPositions();
+      const pos = (mes.ouvertes || []).find(x => x.ticker === ticker);
+      if (!pos) throw new Error("position introuvable, recharge l'appli");
+      const brut = (prixVente / pos.prix - 1) * 100;
+      const gainEur = isNaN(gainSaisi) ? pos.montant * brut / 100 - 2 : gainSaisi;
+      mes.ouvertes = mes.ouvertes.filter(x => x.ticker !== ticker);
+      mes.ventes = [...(mes.ventes || []), {...pos, date_vente: date, prix_vente: prixVente,
+        motif: f.querySelector("#mo").value.trim() || "vente depuis l'appli",
+        gain_pct: Math.round(gainEur / pos.montant * 10000) / 100, gain_eur: Math.round(gainEur * 100) / 100,
+        gain_estime: isNaN(gainSaisi), verdict_du_soir: v.verdict || null}];
+      const depuis = new Date(Date.now() - 5000);
+      await ecrireMesPositions(mes, sha, `Vente de ${ticker} enregistrée depuis l'appli`);
+      fermer();
+      D.mes_positions = {...D.mes_positions, ouvertes: mes.ouvertes, ventes: mes.ventes}; vueActions(); vueAccueil();
+      toast(`Vente de ${ticker} enregistrée.`);
+      suivre("publier.yml", depuis, "Comparaison à la règle");
+    } catch (e) { err.textContent = e.message; f.querySelector("#ok").disabled = false; }
+  };
+}
+
+async function blocGithub() {
+  const el = $("#blocGithub"); if (!el) return;
+  const connecte = !!(await jeton());
+  el.innerHTML = connecte
+    ? `<div class="set">Connexion à GitHub<span class="v up">active</span></div>
+       <div class="set" style="justify-content:center"><a href="#" id="retirerJeton">Retirer le jeton de ce téléphone</a></div>`
+    : `<div style="padding:14px 16px" class="empty">Pour que l'appli puisse lancer un scan et enregistrer tes achats et ventes, crée un jeton GitHub limité :
+        <ol style="padding-left:18px;margin:8px 0">
+          <li>Ouvre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com › jeton à accès limité</a>.</li>
+          <li>Nom : <b>Novice appli</b>. Expiration : 1 an.</li>
+          <li>Repository access : <b>Only select repositories</b> › <b>novice</b>.</li>
+          <li>Permissions › Repository : <b>Contents</b> en Read and write, <b>Actions</b> en Read and write.</li>
+          <li>Generate token, copie-le, colle-le ci-dessous.</li>
+        </ol></div>
+       <div style="padding:0 16px 16px"><input id="champJeton" class="saisie" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn" id="rangerJeton" style="margin-top:10px">Enregistrer sur ce téléphone</button><div class="erreur" id="errJeton"></div></div>`;
+  const r = $("#retirerJeton"); if (r) r.onclick = async ev => { ev.preventDefault(); await ranger("jeton", null); blocGithub(); };
+  const b = $("#rangerJeton"); if (b) b.onclick = async () => {
+    const v = $("#champJeton").value.trim();
+    if (!/^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(v)) return $("#errJeton").textContent = "Ce n'est pas un jeton GitHub.";
+    try {
+      await rangerJeton(v);
+      await gh("");                        // vérifie qu'il ouvre bien le dépôt
+      toast("Jeton enregistré, l'appli est connectée."); blocGithub();
+    } catch (e) {
+      await ranger("jeton", null);
+      $("#errJeton").textContent = e.message === "jeton refusé" || e.message.includes("404")
+        ? "GitHub refuse ce jeton : vérifie qu'il donne accès au dépôt novice." : "Enregistrement impossible : reconnecte-toi avec ton mot de passe puis réessaie.";
+    }
+  };
+}
+
 // ------------------------------------------------------------------ Accueil
 function vueAccueil() {
   const r = R(), maintenant = new Date(), heure = maintenant.getHours();
@@ -409,8 +629,11 @@ function vueNovice() {
     <div class="list">${regle("Poids fondamental / technique", "60 / 40") + regle("Seuil d'achat", "68") + regle("Seuil en régime orange", "73") + regle("Écarter si résultats sous", "7 séances") + regle("Positions maximum", "20 × 300 €")}</div>
     <div class="group-t">Sortie</div>
     <div class="list">${regle("Stop posé à l'achat", "4 × ATR14") + regle("Niveau de vente", "MM50 − 1 ATR") + regle("Clôtures sous le niveau", "2") + regle("Butoir", "6 mois")}</div>
+    <div class="group-t">GitHub (pour agir depuis l'appli)</div>
+    <div class="list" id="blocGithub"></div>
     <div class="group-t">Hypothèses de coût</div>
     <div class="list">${regle("Frais Trade Republic", "1 € + 1 €") + regle("Écart achat / vente", "0,1 % par côté") + regle("Change", "cours du jour")}</div>`;
+  blocGithub();
 }
 
 // ------------------------------------------------------------------ Marchés
@@ -423,7 +646,7 @@ function vueMarches() {
   const actus = Object.entries(D.actus || {}).flatMap(([t, l]) => (l || []).map(a => ({...a, ticker: t})))
     .sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 40);
   $("#v-marches").innerHTML = `
-    <div class="hd"><div><div class="over">Scan du ${dateFr(r.date_scan)}${r.provisoire ? " · provisoire" : ""}</div><h1>Marchés</h1></div></div>
+    <div class="hd"><div><div class="over">Scan du ${dateFr(r.date_scan)}${r.provisoire ? " · provisoire" : ""}</div><h1>Marchés</h1></div><button class="scanbtn" id="btnScan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Scanner</button></div>
     <div style="padding:0 16px"><div class="seg"><button class="on" data-s="mk-sig">Signaux</button><button data-s="mk-act">Actus</button></div></div>
     <div id="mk-sig">
       <div class="card" style="margin-top:14px"><div class="climat"><span class="feu ${esc(dominant)}"></span><div><b style="font-size:15px">S&amp;P 500 en régime ${esc(dominant.toLowerCase())}</b>
@@ -437,6 +660,7 @@ function vueMarches() {
       <div class="foot" style="margin-top:0">Articles Yahoo Finance sur les titres de la short list. Les sources lues par Claude sont dans chaque fiche titre.</div>
     </div>`;
   segments($("#v-marches"), ["mk-sig", "mk-act"]);
+  $("#btnScan").onclick = scanner;
 }
 
 // ------------------------------------------------------------------ Fiche titre
@@ -470,22 +694,26 @@ function fiche(t) {
 // ------------------------------------------------------------------ Mes actions
 function vueActions() {
   const mes = D.mes_positions || {}, ouvertes = mes.ouvertes || [], ventes = mes.ventes || [];
+  setTimeout(() => {
+    const b = $("#btnAchat"); if (b) b.onclick = achat;
+    $$("[data-vente]").forEach(x => x.onclick = () => vente(x.dataset.vente));
+  });
   $("#v-actions").innerHTML = `
-    <div class="hd"><div><div class="over">Trade Republic · réel</div><h1>Mes actions</h1></div></div>
+    <div class="hd"><div><div class="over">Trade Republic · réel</div><h1>Mes actions</h1></div><button class="scanbtn" id="btnAchat">+ Achat</button></div>
     ${ouvertes.length ? ouvertes.map(p => { const v = p.verdict || {};
       return `<div class="card" style="margin-top:14px">
         <div class="row"><div class="row" style="gap:12px;justify-content:flex-start"><div class="logo">${esc(p.ticker)}</div><div><b style="font-size:16px">${esc(p.nom || p.ticker)}</b><div class="over" style="font-size:12px">acheté ${nb(p.prix, 2)} le ${dateFr(p.date_achat)}${v.seances ? " · séance " + v.seances : ""}</div></div></div>
           <b class="${classe(v.dernier_cours / p.prix - 1)}" style="font-size:17px">${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) : "—"}</b></div>
         <div class="verdict v-${esc(v.verdict)}"><span class="ic">${v.verdict === "Garder" ? "✓" : v.verdict === "Alerte" ? "!" : "×"}</span><div><b>${esc(v.verdict || "?")}</b><span>${esc(v.raison || "")}</span></div></div>
         <div class="levels"><div><b>${nb(v.niveau_vente, 2)}</b><span>niveau de vente</span></div><div><b>${nb(v.stop, 2)}</b><span>stop 4 ATR</span></div><div><b>${pct(v.marge_avant_sortie_pct)}</b><span>marge avant sortie</span></div></div>
-        <div class="foot" style="margin:12px 0 0">Fiche complète : <a href="#" data-fiche="${esc(p.ticker)}">graphique et actus</a></div>
+        <div class="row" style="margin-top:12px"><a href="#" data-fiche="${esc(p.ticker)}" style="font-size:13px">Graphique et actus</a><button class="scanbtn" data-vente="${esc(p.ticker)}">J'ai vendu</button></div>
       </div>`; }).join("")
-      : `<div class="card" style="margin-top:14px"><div class="empty">Aucune position en cours. Quand tu achètes, Novice calculera ton stop, ton niveau de vente et te donnera un verdict chaque soir. L'ajout d'un achat depuis l'appli arrive à la prochaine étape ; en attendant, dis-le à Claude.</div></div>`}
+      : `<div class="card" style="margin-top:14px"><div class="empty">Aucune position en cours. Quand tu achètes chez Trade Republic, touche <b>+ Achat</b> : Novice calculera ton stop, ton niveau de vente et te donnera un verdict chaque soir.</div></div>`}
     <h2>Mes ventes</h2>
     <div class="list">${ventes.slice().reverse().map(v => `<div class="li"><div class="logo">${esc(v.ticker)}</div><div class="t"><b>${esc(v.nom)}</b><span>${dateFr(v.date_achat)} → ${dateFr(v.date_vente)} · ${esc(v.motif)}</span></div><div class="r ${classe(v.gain_eur)}">${pct(v.gain_pct)}<span>${eur(v.gain_eur, 2)}</span></div></div>`).join("") || `<div class="li"><div class="empty">Aucune vente.</div></div>`}</div>
     ${ventes.length ? `<h2>Toi contre la règle</h2><div class="card"><div class="vsr"><span class="h">Titre</span><span class="h">Toi</span><span class="h">Règle aujourd'hui</span>
       ${ventes.map(v => { const r = v.regle || {}; return `<span>${esc(v.ticker)}</span><b class="${classe(v.gain_pct)}">${pct(v.gain_pct)}</b><span>${pct(r.gain_brut_pct)} <span class="muted">(${r.etat === "vendue" ? "vendue " + dateFr(r.date_sortie) : "encore ouverte"})</span></span>`; }).join("")}</div>
-      <div class="empty" style="margin-top:12px">« Toi » : gain net, frais compris. « Règle » : ce que donnerait aujourd'hui la règle du système sur le même achat, avant frais et change. ${ventes.length} opérations ne permettent aucune conclusion.</div></div>` : ""}`;
+      <div class="empty" style="margin-top:12px">« Toi » : gain net, frais compris (estimé quand tu ne l'as pas saisi). « Règle » : ce que donnerait aujourd'hui la règle du système sur le même achat, avant frais et change. ${ventes.length} opérations ne permettent aucune conclusion.</div></div>` : ""}`;
 }
 
 // ------------------------------------------------------------------ Labo
