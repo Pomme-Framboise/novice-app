@@ -520,18 +520,48 @@ async function blocGithub() {
         <button class="btn" id="rangerJeton" style="margin-top:10px">Enregistrer sur ce téléphone</button><div class="erreur" id="errJeton"></div></div>`;
   const r = $("#retirerJeton"); if (r) r.onclick = async ev => { ev.preventDefault(); await ranger("jeton", null); blocGithub(); };
   const b = $("#rangerJeton"); if (b) b.onclick = async () => {
-    const v = $("#champJeton").value.trim();
-    if (!/^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(v)) return $("#errJeton").textContent = "Ce n'est pas un jeton GitHub.";
+    const v = $("#champJeton").value.trim(), err = $("#errJeton");
+    if (!/^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(v)) return err.textContent = "Ce n'est pas un jeton GitHub (il commence par github_pat_).";
+    b.disabled = true; b.textContent = "Vérification…"; err.textContent = "";
     try {
+      // Une clé gardée avant cette version sait lire, pas chiffrer : on la
+      // renouvelle avec le mot de passe, une seule fois.
+      if (!CLE || !CLE.usages.includes("encrypt")) {
+        const mdp = await demanderMotDePasse();
+        if (!mdp) throw new Error("annulé");
+        const paquet = await chargerPaquet();
+        const cle = await deriverCle(mdp, b64(paquet.sel), paquet.tours);
+        await dechiffrer(cle, paquet);            // vérifie que c'est le bon
+        CLE = cle; await memoriser(cle);
+      }
       await rangerJeton(v);
-      await gh("");                        // vérifie qu'il ouvre bien le dépôt
+      await gh("");                                // le jeton ouvre-t-il le dépôt ?
       toast("Jeton enregistré, l'appli est connectée."); blocGithub();
     } catch (e) {
-      await ranger("jeton", null);
-      $("#errJeton").textContent = e.message === "jeton refusé" || e.message.includes("404")
-        ? "GitHub refuse ce jeton : vérifie qu'il donne accès au dépôt novice." : "Enregistrement impossible : reconnecte-toi avec ton mot de passe puis réessaie.";
+      if (e.message !== "annulé") await ranger("jeton", null);
+      b.disabled = false; b.textContent = "Enregistrer sur ce téléphone";
+      err.textContent = e.message === "annulé" ? ""
+        : e.message === "jeton refusé" ? "GitHub refuse ce jeton : il est invalide ou expiré."
+        : e.message.includes("404") ? "Ce jeton n'ouvre pas le dépôt novice : vérifie « Only select repositories › novice »."
+        : e.message.includes("403") ? "Ce jeton n'a pas les bons droits : Contents et Actions en Read and write."
+        : e.name === "OperationError" ? "Mot de passe incorrect."
+        : "Enregistrement impossible : " + e.message;
     }
   };
+}
+
+function demanderMotDePasse() {
+  return new Promise(ok => {
+    const {f, fermer} = feuille(`<h3>Ton mot de passe, une fois</h3>
+      <p>Pour ranger le jeton en sécurité sur ce téléphone, Novice a besoin de ton mot de passe une dernière fois.</p>
+      <input type="text" name="username" value="antoine" autocomplete="username" hidden aria-hidden="true">
+      <label class="champ"><span>Mot de passe</span><input type="password" id="mdp" autocomplete="current-password"></label>
+      <button class="btn" id="okMdp">Continuer</button><button class="btn sec" id="annulerMdp">Annuler</button>`);
+    f.querySelector("#okMdp").onclick = () => { const v = f.querySelector("#mdp").value; fermer(); ok(v); };
+    f.querySelector("#annulerMdp").onclick = () => { fermer(); ok(null); };
+    $$(".feuille-fond").forEach(x => x.onclick = () => { fermer(); ok(null); });
+    setTimeout(() => f.querySelector("#mdp").focus(), 100);
+  });
 }
 
 // ------------------------------------------------------------------ Accueil
