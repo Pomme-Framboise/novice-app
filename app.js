@@ -685,14 +685,16 @@ async function afficherConversation() {
   const c = await conversation();
   m.innerHTML = c.slice(-12).map(x => `<div class="msg moi">${esc(x.q)}</div>` + (x.r
     ? `<div class="msg novice">${esc(x.r).replace(/\n/g, "<br>")}${(x.sources || []).length ? `<div class="sources" style="margin-top:6px">${x.sources.slice(0, 3).map(s => `<a href="${lien(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.titre || s.url)}</a>`).join("")}</div>` : ""}</div>`
-    : `<div class="msg novice attente">Je réfléchis… (1 à 2 minutes)</div>`)).join("");
+    : `<div class="msg novice attente">Je réfléchis… <span data-chrono="${x.depuis || Date.now()}"></span></div>`)).join("");
 }
+// Compteur de secondes dans la bulle d'attente.
+setInterval(() => $$("[data-chrono]").forEach(e => e.textContent = Math.round((Date.now() - Number(e.dataset.chrono)) / 1000) + " s"), 1000);
 async function poser(question) {
   question = question.trim().slice(0, 500);
   if (!question || !await exigerJeton()) return;
   const id = Date.now().toString(36) + "-" + [...aleatoire(4)].map(x => x.toString(16).padStart(2, "0")).join("");
   const c = await conversation();
-  c.push({id, q: question, r: null});
+  c.push({id, q: question, r: null, depuis: Date.now()});
   await ranger("conversation", c.slice(-30));
   afficherConversation();
   try {
@@ -706,8 +708,8 @@ async function noter(id, champs) {
   await ranger("conversation", c); afficherConversation();
 }
 async function attendreReponse(id) {
-  for (let i = 0; i < 36; i++) {          // jusqu'à 6 minutes
-    await new Promise(ok => setTimeout(ok, 10000));
+  for (let i = 0; i < 90; i++) {          // toutes les 3 s pendant 2 min, puis toutes les 10 s : ~9 minutes
+    await new Promise(ok => setTimeout(ok, i < 40 ? 3000 : 10000));
     try {
       const f = await gh(`/contents/donnees/reponses/${id}.json?ref=main`);
       const r = JSON.parse(depuisB64(f.content));
@@ -731,6 +733,33 @@ const ROUE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-
 const heureDe = s => { const d = new Date(s); return String(d.getHours()).padStart(2, "0") + "h" + String(d.getMinutes()).padStart(2, "0"); };
 const titrePoint = r => r.type === "manuel" ? `Le point de ${heureDe(r.genere_le)}` : "Le point du soir";
 const chipVerdict = v => `<span class="chip ${v === "Garder" ? "in" : v === "Alerte" ? "al" : "out"}">${esc(v || "?")}</span>`;
+
+// Titres « sous surveillance » : au-dessus de 55, sous le seuil d'achat.
+// Pour chacun : ce qui manque pour que Novice achète, et la question qui
+// coûte le plus de points.
+const NOMS_Q = {Q1: "Résultats et guidance", Q2: "Potentiel analystes", Q3: "Momentum sectoriel", Q4: "Catalyseur à 90 jours", Q5: "Force relative", Q6: "Risques"};
+const seuilDe = t => { const m = /seuil (\d+)/.exec(t.motif || ""); return m ? Number(m[1]) : (t.regime_indice === "ORANGE" ? 73 : 68); };
+function pointFaible(ticker) {
+  const g = grilleDe(ticker); if (!g) return null;
+  let pire = null;
+  for (const [k, q] of Object.entries(g.questions || {})) { const manque = (q.max || 0) - (q.points || 0); if (!pire || manque > pire.manque) pire = {k, manque, q}; }
+  return pire;
+}
+function surveillance() {
+  const r = R();
+  return [...(r.short_list || []), ...(r.reprises_confirmees || [])].filter(t => t.statut === "sous surveillance")
+    .sort((a, b) => (b.score_global || 0) - (a.score_global || 0));
+}
+function ligneSurveillance(t) {
+  const seuil = seuilDe(t), manque = Math.max(0, seuil - (t.score_global || 0)), pf = pointFaible(t.ticker);
+  return `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b>
+    <span>il manque ${nb(manque, 0)} point${manque >= 1.5 ? "s" : ""}${pf ? ` · point faible : ${NOMS_Q[pf.k] || pf.k} ${nb(pf.q.points, 0)}/${pf.q.max}` : ""}</span>
+    <div class="jauge"><i style="width:${Math.min(100, (t.score_global || 0) / seuil * 100)}%"></i></div></div>
+    <div class="r">${nb(t.score_global, 0)}<span>seuil ${seuil}</span></div></div>`;
+}
+const blocSurveillance = (titre = "En surveillance") => { const l = surveillance();
+  return l.length ? `<h2>${titre} <small style="cursor:default">${l.length} titre${l.length > 1 ? "s" : ""}</small></h2><div class="list">${l.map(ligneSurveillance).join("")}</div>
+    <div class="foot" style="margin-top:0">Au-dessus de 55, sous le seuil d'achat. Novice les achète dès qu'ils le franchissent.</div>` : ""; };
 
 // Mouvements de Novice décidés par le dernier calcul.
 function mouvements() {
@@ -780,8 +809,8 @@ function vueAccueil() {
     </div>
 
     <h2>${r.type === "manuel" ? "Ce scan" : "Ce soir"} <small data-go="marches">Marchés</small></h2>
-    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>Aucun titre n'a réuni tes conditions, aucune position à vendre.</span></div></div>`}</div>
-    <div class="list">${top.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>`;
+    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>Ce calcul n'a décidé ni achat ni vente.</span></div></div>`}</div>
+    ${surveillance().length ? blocSurveillance() : `<div class="list">${top.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>`}`;
   const svg = $("#courbeAccueil");
   if (svg) traceLignes(svg, [{d: a.out.novice, c: css("--accent"), w: 2}, {d: a.out.hasard, c: css("--grey")}, {d: a.out.indice, c: css("--dash"), dash: 1}], 316, 118, 0);
   const o = $("#ouvrirPoint"); if (o) o.onclick = () => pointDuSoir(true);
@@ -829,8 +858,8 @@ async function pointDuSoir(force = false) {
     ${mes.length ? `<h2>Mes actions</h2><div class="list">${mes.map(p => { const v = p.verdict || {};
       return `<div class="li"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom || p.ticker)}</b><span>${esc(v.raison || "")}</span></div>${chipVerdict(v.verdict)}</div>`; }).join("")}</div>` : ""}
 
-    <h2>Les mieux notés</h2>
-    <div class="list">${top.map(t => `<div class="li"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>
+    ${surveillance().length ? blocSurveillance() : `<h2>Les mieux notés</h2>
+    <div class="list">${top.map(t => `<div class="li"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>`}
 
     ${faits.length ? `<h2>À retenir</h2><div class="list">${faits.map(([t, x]) => `<div class="li"><div class="logo">${esc(t)}</div><div class="t"><span style="color:var(--ink);font-size:14px;line-height:1.4;display:block">${esc(x)}</span></div></div>`).join("")}</div>
       <div class="foot" style="margin-top:0">Lu sur le web par Claude pendant le calcul.</div>` : ""}
@@ -840,6 +869,7 @@ async function pointDuSoir(force = false) {
   const fermer = () => page.remove();
   page.querySelector(".fermer").onclick = fermer;
   page.querySelector(".btn").onclick = fermer;
+  page.querySelectorAll("[data-fiche]").forEach(x => x.addEventListener("click", fermer));
 }
 
 // ------------------------------------------------------------------ Novice
@@ -855,7 +885,7 @@ function vueNovice() {
         <div class="msgs" id="msgs"></div>
         <div class="sugg" id="sugg"><button>Pourquoi aucun achat ce soir ?</button><button>Explique la note du mieux classé</button><button>Où en est le Labo ?</button></div>
         <div class="chat"><input id="chatIn" placeholder="Pose-moi une question…" enterkeyhint="send"><button id="chatGo" aria-label="Envoyer">↑</button></div>
-        <div class="foot" style="margin:8px 0 0">Je réponds en 1 à 2 minutes : je relis mes données du soir et je cherche sur le web si besoin.</div></div>
+        <div class="foot" style="margin:8px 0 0">Je réponds en 30 secondes environ, une minute si je dois chercher sur le web.</div></div>
       <h2>Mon travail</h2>
       <div class="card tappable" data-open="resultats">
         <div class="row"><span class="over">Depuis le ${dateFr(D.novice.lance_le)}</span><span class="cta" style="margin:0">Tout voir ›</span></div>
@@ -948,7 +978,10 @@ function vueMarches() {
     <div id="mk-sig">
       <div class="card" style="margin-top:14px"><div class="climat"><span class="feu ${esc(dominant)}"></span><div><b style="font-size:15px">S&amp;P 500 en régime ${esc(dominant.toLowerCase())}</b>
         <div class="over" style="font-size:12.5px">Tous indices : ${compte("VERT")} verts, ${compte("ORANGE")} orange, ${compte("ROUGE")} rouges. Seuil d'achat à 73 en orange, aucun achat en rouge.</div></div></div></div>
-      <h2>Short list</h2>
+      ${(() => { const ok = liste.filter(t => t.statut === "conditions réunies");
+        return ok.length ? `<h2>Conditions réunies <small style="cursor:default">${ok.length}</small></h2><div class="list">${ok.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || "")}</span></div><div class="r up">${nb(t.score_global, 0)}<span>seuil ${seuilDe(t)}</span></div></div>`).join("")}</div>` : ""; })()}
+      ${blocSurveillance()}
+      <h2>Short list complète</h2>
       <div class="list">${liste.map((t, i) => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="rank">${i + 1}</div><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span class="chip ${statutChip(t.statut)}" style="display:inline-block;margin-top:4px">${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>score</span></div></div>`).join("")}</div>
       <div class="foot" style="margin-top:0">Classement par force relative parmi ${nb(r.univers_analyse, 0)} titres, puis six questions sur les 10 premiers. Score global = 0,6 × fondamental + 0,4 × technique.</div>
     </div>
@@ -978,7 +1011,7 @@ function fiche(t) {
     ${g ? `<h2>Score global</h2><div class="card">
       <div class="row"><div class="score"><b>${nb(g.score_global, 0)}</b><span class="muted">/ 100</span></div><span class="chip ${statut === "conditions réunies" ? "in" : statut === "sous surveillance" ? "al" : "neutre"}">${esc(statut)}</span></div>
       <div class="rowmini"><span>Fondamental <b style="color:var(--ink)">${nb(g.fondamental, 0)}</b> × 0,6</span><span>Technique <b style="color:var(--ink)">${nb(g.technique, 0)}</b> × 0,4</span></div>
-      <div class="over" style="font-size:12.5px;margin-top:8px">${esc(g.motif)}</div></div>
+      <div class="over" style="font-size:12.5px;margin-top:8px">${esc(g.motif)}${statut === "sous surveillance" && s.ticker ? ` · il manque ${nb(Math.max(0, seuilDe(s) - g.score_global), 0)} points pour que Novice achète` : ""}</div></div>
       <div class="card">${Q.map(([k, l]) => { const q = g.questions[k] || {}; return `<div class="q6 tappable" data-why><span class="n">${k}</span><span class="l">${l}<small class="why" hidden>${esc(q.detail)}</small></span><span class="p">${nb(q.points, 0)}<span class="muted" style="font-weight:500"> / ${q.max}</span></span></div>`; }).join("")}</div>
       <div class="foot" style="margin-top:-4px">Touche une question pour lire sa justification.${lec.modele ? ` Lecture de l'actualité : ${esc(lec.modele === "claude" ? "Claude, avec recherche web" : lec.modele)}.` : ""}</div>` : ""}
     ${(() => { const p = ((D.filtres || {}).presse || {})[t], an = ((D.filtres || {}).analystes || {})[t];

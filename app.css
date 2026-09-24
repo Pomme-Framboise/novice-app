@@ -85,6 +85,8 @@ h2 small{font-size:14px;font-weight:500;color:var(--muted);cursor:pointer}
 .li .t span{font-size:13px;color:var(--muted)}
 .li .r{text-align:right;font-size:15px;font-weight:600;white-space:nowrap}
 .li .r span{display:block;font-size:12px;font-weight:500;color:var(--muted)}
+.jauge{height:3px;border-radius:2px;background:var(--surface2);overflow:hidden;margin-top:7px;max-width:180px}
+.jauge i{display:block;height:100%;background:var(--warn);border-radius:2px}
 .chev{color:var(--grey);font-size:18px;margin-left:-4px}
 .rank{width:18px;font-size:13px;font-weight:600;color:var(--muted);text-align:center;flex:none}
 .chip{font-size:12px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap}
