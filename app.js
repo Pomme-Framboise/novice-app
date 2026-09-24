@@ -31,9 +31,9 @@ const dateFr = s => { if (!s) return "—"; const [a, m, j] = s.slice(0, 10).spl
 const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 const JOURS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 const dateLongue = d => `${JOURS[d.getDay()]} ${d.getDate()} ${MOIS[d.getMonth()]}`;
-const NOMS = {novice: "Novice", calc: "Calculateur de hausse", n1: "N°1 du scan", tech: "Top 10 technique seul",
+const NOMS = {novice: "Novice", calc: "Calculateur de hausse", calc10: "Calculateur, vente à +10 %", n1: "N°1 du scan", tech: "Top 10 technique seul",
               v15: "Vente à +15 %", hasard: "Hasard", indice: "Indice"};
-const COULEURS = {calc: "#5B8DEF", n1: "#2BA39B", tech: "#8E6BD8", v15: "#E07A5F", hasard: "--grey", indice: "--dash"};
+const COULEURS = {calc: "#5B8DEF", calc10: "#9DB7F2", n1: "#2BA39B", tech: "#8E6BD8", v15: "#E07A5F", hasard: "--grey", indice: "--dash"};
 const TEMOINS = ["hasard", "indice"];
 const col = c => c.startsWith("--") ? css(c) : c;
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
