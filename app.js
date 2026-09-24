@@ -164,7 +164,8 @@ async function demarrer() {
   // Test en local uniquement : données en clair, jamais publiées.
   if (new URLSearchParams(location.search).has("clair") && !location.hostname.endsWith("github.io")) {
     D = await (await fetch("donnees-en-clair.json", {cache: "no-store"})).json();
-    return afficher();
+    afficher();
+    return pointDuSoir();
   }
   const cle = await relire();
   if (cle) {
@@ -172,11 +173,19 @@ async function demarrer() {
       D = await dechiffrer(cle, await chargerPaquet());
       CLE = cle;
       afficher();
-      if (await sortir("faceid")) ecranVerrou();
+      if (await sortir("faceid")) ecranVerrou(apresOuverture);
+      else apresOuverture();
       return;
     } catch (e) { await oublier(); }
   }
   ecranConnexion();
+}
+
+// Une fois l'appli ouverte : le point du soir s'il est nouveau, puis la
+// reprise du suivi d'un calcul en cours (lancé d'ici ou par l'horloge du soir).
+function apresOuverture() {
+  pointDuSoir();
+  reprendreSuivi();
 }
 
 function ecranConnexion(message = "") {
@@ -201,6 +210,7 @@ function ecranConnexion(message = "") {
       const garder = $("#memo").checked;
       if (garder) await memoriser(cle);
       afficher();
+      apresOuverture();
       if (garder && await faceIdPossible() && !(await sortir("faceid"))) proposerFaceId();
     } catch (e) {
       bouton.disabled = false; bouton.textContent = "Ouvrir";
@@ -248,7 +258,7 @@ function traceLignes(svg, sets, W, H, aireIdx) {
   const pad = (mx - mn) * 0.08 || 1;
   const X = i => i / (sets[0].d.length - 1) * W, Y = v => H - 6 - (v - mn + pad) / (mx - mn + 2 * pad) * (H - 12);
   const p = d => d.map((v, i) => v == null ? "" : (i && d[i - 1] != null ? "L" : "M") + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join("");
-  const or = css("--gold-2");
+  const or = css("--accent");
   let h = `<defs><linearGradient id="g${svg.id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${or}" stop-opacity=".3"/><stop offset="1" stop-color="${or}" stop-opacity="0"/></linearGradient></defs>`;
   h += `<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="${css("--line")}"/>`;
   if (aireIdx != null) h += `<path d="${p(sets[aireIdx].d)}L${W},${H}L0,${H}Z" fill="url(#g${svg.id})"/>`;
@@ -259,7 +269,7 @@ function traceLignes(svg, sets, W, H, aireIdx) {
 // ------------------------------------------------------------------ structure
 const ICONES = {
   accueil: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
-  novice: '<path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/>',
+  novice: '<path d="M21 12.5A9 9 0 1 1 11.5 3v9.5z"/><path d="M15 3.3a9 9 0 0 1 5.7 5.7H15z"/>',
   marches: '<path d="M3 17l5-5 4 4 8-9"/><path d="M15 7h5v5"/>',
   actions: '<rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18M16 15h2"/>',
   labo: '<path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7.5 15h9"/>'
@@ -278,15 +288,16 @@ function afficher() {
     </div>
     <section class="sub" id="s-fiche"></section>
     <section class="sub" id="s-resultats"></section>
-    <section class="sub" id="s-reglages"></section>
+    <section class="sub" id="s-regles"></section>
+    <section class="sub" id="s-appli"></section>
     <section class="sub" id="s-strat"></section>
-    <nav class="tabs">${Object.keys(ICONES).map(k => `<button class="tab${k === "accueil" ? " on" : ""}" data-v="${k}">${k === "actions" && alerte ? '<span class="dot"></span>' : ""}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICONES[k]}</svg>${LIBELLES[k]}</button>`).join("")}</nav>`;
-  vueAccueil(); vueNovice(); vueMarches(); vueActions(); vueLabo();
+    <nav class="tabs">${Object.keys(ICONES).map(k => `<button class="tab${k === "accueil" ? " on" : ""}" data-v="${k}">${k === "actions" && alerte ? '<span class="dot"></span>' : ""}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONES[k]}</svg>${LIBELLES[k]}</button>`).join("")}</nav>`;
+  vueAccueil(); vueNovice(); vueMarches(); vueActions(); vueLabo(); vueAppli();
   $$(".tab").forEach(t => t.onclick = () => aller(t.dataset.v));
   // Lien direct vers la case du jeton GitHub : …/novice-app/#github
   if (location.hash === "#github") {
     history.replaceState(null, "", location.pathname);
-    aller("novice"); ouvrir("reglages");
+    ouvrir("appli");
     setTimeout(() => { const c = $("#blocGithub"); if (c) c.scrollIntoView({block: "center"}); const champ = $("#champJeton"); if (champ) champ.focus(); }, 500);
   }
 }
@@ -357,30 +368,129 @@ async function ecrireMesPositions(mes, sha, message) {
     message, sha, branch: "main", content: versB64(JSON.stringify(mes, null, 1) + "\n")})});
 }
 
-// Suivi d'un calcul lancé sur GitHub, puis rechargement des données publiées.
-async function suivre(workflow, depuis, message) {
-  const bandeau = $("#suivi") || document.body.appendChild(Object.assign(document.createElement("div"), {id: "suivi", className: "toast show"}));
-  bandeau.classList.add("show");
-  for (let i = 0; i < 90; i++) {
-    await new Promise(ok => setTimeout(ok, 15000));
-    let run;
-    try { run = ((await gh(`/actions/workflows/${workflow}/runs?per_page=5`)).workflow_runs || []).find(r => new Date(r.created_at) >= depuis); } catch (e) { continue; }
-    if (!run) { bandeau.textContent = `${message} : en file d'attente chez GitHub…`; continue; }
-    if (run.status !== "completed") {
-      let etape = "";
-      try { const jobs = await gh(`/actions/runs/${run.id}/jobs`); const e = (jobs.jobs[0].steps || []).find(x => x.status === "in_progress"); etape = e ? " · " + e.name : ""; } catch (e) {}
-      bandeau.textContent = `${message} : en cours${etape}`;
-      continue;
-    }
-    if (run.conclusion !== "success") { bandeau.textContent = `${message} : échec chez GitHub. Réessaie plus tard.`; setTimeout(() => bandeau.remove(), 8000); return; }
-    bandeau.textContent = "Terminé, mise à jour de l'appli…";
-    await new Promise(ok => setTimeout(ok, 45000));   // le temps que GitHub Pages serve la nouvelle version
-    try { D = await dechiffrer(CLE, await chargerPaquet()); afficher(); } catch (e) {}
-    bandeau.remove();
-    toast("Données à jour.");
-    return;
+// Suivi d'un calcul lancé sur GitHub : barre de progression, puis
+// rechargement des données publiées. La progression est estimée à partir des
+// étapes du calcul et de leur durée habituelle (mesurée sur les calculs des
+// 23 et 24/09) ; l'étape en cours avance avec le temps écoulé, sans jamais
+// atteindre 100 % avant d'être vraiment finie.
+const DUREES = {   // nom de l'étape sur GitHub → [ce qu'on affiche, secondes habituelles]
+  "Installer les bibliothèques": ["Préparation de la machine", 13],
+  "Préparer (scan, collecte, actus)": ["Scan des ~870 titres et collecte", 60],
+  "Lecture des actus par Claude": ["Claude lit l'actualité des titres", 400],
+  "Noter (six questions, score global)": ["Six questions, décisions de Novice", 40],
+  "Publier l'appli (paquet chiffré)": ["Publication chiffrée", 10],
+};
+const NOTER_SOIR_S = 360;     // le soir, filtres de presse et Labo en plus
+const MISE_EN_LIGNE_S = 60;   // GitHub Pages met ~1 minute à servir la nouvelle version
+let suiviActif = false;
+
+function panneauSuivi() {
+  let p = $("#suivi");
+  if (!p) {
+    p = document.body.appendChild(Object.assign(document.createElement("div"), {id: "suivi", className: "suivi"}));
+    p.innerHTML = `<div class="row"><b id="suiviTitre"></b><span class="pc" id="suiviPc"></span></div>
+      <div class="barre attente" id="suiviBarre"><i></i></div><small id="suiviDetail"></small>`;
   }
-  bandeau.textContent = `${message} : toujours en cours, reviens plus tard.`;
+  return p;
+}
+function majSuivi(titre, pc, detail) {
+  panneauSuivi();
+  $("#suiviTitre").textContent = titre;
+  $("#suiviPc").textContent = pc == null ? "" : Math.round(pc) + " %";
+  $("#suiviDetail").textContent = detail || "";
+  const barre = $("#suiviBarre");
+  barre.classList.toggle("attente", pc == null);
+  barre.firstElementChild.style.width = pc == null ? "" : Math.max(2, pc) + "%";
+  const b = $("#btnScan"); if (b) { b.disabled = true; b.lastChild.textContent = pc == null ? "En cours" : Math.round(pc) + " %"; }
+}
+const minutes = s => s < 60 ? `${Math.round(s)} s` : `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+// Avancement d'un calcul d'après ses étapes : [pourcentage, étape en cours, secondes restantes].
+function avancement(steps, maintenant, soir = false) {
+  const poids = s => soir && s.name.startsWith("Noter") ? NOTER_SOIR_S : (DUREES[s.name] || [s.name, 2])[1];
+  const total = steps.reduce((a, s) => a + poids(s), 0) + MISE_EN_LIGNE_S;
+  let fait = 0, courante = null;
+  for (const s of steps) {
+    if (s.status === "completed") fait += poids(s);
+    else if (s.status === "in_progress") {
+      courante = s;
+      const ecoule = (maintenant - new Date(s.started_at)) / 1000;
+      fait += Math.min(ecoule / poids(s), 0.95) * poids(s);
+    }
+  }
+  const libelle = courante ? (DUREES[courante.name] || [courante.name])[0] : "Démarrage";
+  return [fait / total * 100, libelle, Math.max(total - fait, 0)];
+}
+
+async function suivre(workflow, depuis, message, runId = null) {
+  if (suiviActif) return;
+  suiviActif = true;
+  await ranger("suivi", {workflow, depuis: depuis.toISOString(), message, runId});
+  majSuivi(message, null, "Envoi à GitHub…");
+  const avant = D && D.publie_le;
+  const debut = Date.now();
+  try {
+    for (let i = 0; i < 400; i++) {
+      await new Promise(ok => setTimeout(ok, i ? 6000 : 2500));
+      let run;
+      try {
+        run = runId ? await gh(`/actions/runs/${runId}`)
+          : ((await gh(`/actions/workflows/${workflow}/runs?per_page=5`)).workflow_runs || []).find(r => new Date(r.created_at) >= depuis);
+      } catch (e) { continue; }
+      if (!run) { majSuivi(message, null, "En file d'attente chez GitHub…"); continue; }
+      runId = run.id;
+      if (run.status !== "completed") {
+        if (run.status !== "in_progress") { majSuivi(message, 1, "En file d'attente chez GitHub…"); continue; }
+        try {
+          const job = (await gh(`/actions/runs/${run.id}/jobs`)).jobs[0];
+          const [pc, libelle, reste] = avancement(job.steps || [], new Date(), run.event === "schedule");
+          majSuivi(`${message} · ${libelle}`, pc, `${minutes((Date.now() - new Date(run.run_started_at || run.created_at)) / 1000)} écoulées · encore ${minutes(reste)} environ`);
+        } catch (e) {}
+        continue;
+      }
+      if (run.conclusion !== "success") {
+        majSuivi(`${message} : échec chez GitHub`, 100, "Rien n'a été modifié. Réessaie plus tard.");
+        panneauSuivi().className = "suivi echec";
+        setTimeout(() => $("#suivi") && $("#suivi").remove(), 9000);
+        return;
+      }
+      // Calcul fini : on attend que la nouvelle version soit servie.
+      for (let k = 0; k < 24; k++) {
+        majSuivi(`${message} · mise en ligne`, 96 + Math.min(k, 3), "GitHub publie la nouvelle version…");
+        await new Promise(ok => setTimeout(ok, 5000));
+        try {
+          const neuf = await dechiffrer(CLE, await chargerPaquet());
+          if (neuf.publie_le !== avant) { D = neuf; afficher(); break; }
+        } catch (e) {}
+      }
+      majSuivi(`${message} terminé`, 100, `en ${minutes((Date.now() - debut) / 1000)}`);
+      panneauSuivi().className = "suivi fin";
+      setTimeout(() => $("#suivi") && $("#suivi").remove(), 4000);
+      pointDuSoir();
+      return;
+    }
+    majSuivi(`${message} : toujours en cours`, null, "Reviens plus tard, la suite s'affichera à l'ouverture.");
+    setTimeout(() => $("#suivi") && $("#suivi").remove(), 10000);
+  } finally {
+    suiviActif = false;
+    await ranger("suivi", null);
+    const b = $("#btnScan"); if (b) { b.disabled = false; b.lastChild.textContent = "Scanner"; }
+  }
+}
+
+// À l'ouverture : un suivi interrompu (appli fermée) ou un calcul lancé
+// ailleurs (horloge du soir, autre appareil) reprend sa barre de progression.
+async function reprendreSuivi() {
+  if (suiviActif || !(await jeton())) return;
+  const s = await sortir("suivi");
+  if (s && Date.now() - new Date(s.depuis) < 90 * 60000) return suivre(s.workflow, new Date(s.depuis), s.message, s.runId);
+  try {
+    for (const w of ["soir.yml", "publier.yml"]) {
+      const run = ((await gh(`/actions/workflows/${w}/runs?per_page=3`)).workflow_runs || []).find(r => r.status !== "completed");
+      if (run) return suivre(w, new Date(run.created_at), w === "publier.yml" ? "Mise à jour"
+        : run.event === "schedule" ? "Calcul du soir" : "Scan", run.id);
+    }
+  } catch (e) {}
 }
 
 function toast(texte) {
@@ -399,15 +509,16 @@ function feuille(html) {
 
 async function exigerJeton() {
   if (await jeton()) return true;
-  toast("Connecte d'abord l'appli à GitHub : Novice › roue crantée › GitHub.");
+  toast("Connecte d'abord l'appli à GitHub : Accueil › Réglages › GitHub.");
   return false;
 }
 
 async function scanner() {
   if (!await exigerJeton()) return;
+  if (suiviActif) return toast("Un calcul est déjà en cours : suis sa progression en bas de l'écran.");
   const {f, fermer} = feuille(`<h3>Lancer un scan maintenant ?</h3>
-    <p>Novice refait tout : cours des ~870 titres, classement, six questions lues par Claude. Compte 5 à 10 minutes.</p>
-    <p>Pendant la séance, c'est un <b>aperçu provisoire</b> : Novice n'achète et ne vend que sur le calcul du soir.</p>
+    <p>Novice refait tout : cours des ~870 titres, classement, six questions lues par Claude. Compte 5 à 12 minutes.</p>
+    <p>Si un titre réunit tes conditions, <b>Novice l'achète</b> : tout de suite au cours du moment si sa Bourse est ouverte, sinon à l'ouverture suivante. Les ventes restent décidées sur les clôtures, le soir.</p>
     <button class="btn" id="go">Lancer le scan</button><button class="btn sec" data-annuler>Annuler</button>`);
   f.querySelector("#go").onclick = async () => {
     fermer();
@@ -616,58 +727,119 @@ function brancherConversation() {
 }
 
 // ------------------------------------------------------------------ Accueil
+const ROUE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
+const heureDe = s => { const d = new Date(s); return String(d.getHours()).padStart(2, "0") + "h" + String(d.getMinutes()).padStart(2, "0"); };
+const titrePoint = r => r.type === "manuel" ? `Le point de ${heureDe(r.genere_le)}` : "Le point du soir";
+const chipVerdict = v => `<span class="chip ${v === "Garder" ? "in" : v === "Alerte" ? "al" : "out"}">${esc(v || "?")}</span>`;
+
+// Mouvements de Novice décidés par le dernier calcul.
+function mouvements() {
+  const nov = R().novice || {};
+  const ligne = (t, texte, chip) => `<div class="li tappable" data-fiche="${esc(t)}"><div class="logo">${esc(t)}</div><div class="t"><b>${esc(nomDe(t))}</b><span>${texte}</span></div>${chip}</div>`;
+  return [
+    ...(nov.achats_maintenant || []).map(t => { const p = (D.novice.positions || []).find(x => x.ticker === t && x.etat !== "vendue") || {};
+      return ligne(t, `acheté ${p.prix_entree ? "à " + nb(p.prix_entree, 2) : "en séance"} · 300 €`, '<span class="chip in">Achat</span>'); }),
+    ...(nov.achats_demain || []).map(t => ligne(t, "achat à l'ouverture suivante · 300 €", '<span class="chip in">Achat</span>')),
+    ...(nov.ventes_demain || []).map(t => ligne(t, "deuxième clôture sous le niveau de vente", '<span class="chip out">Vente</span>'))];
+}
+
 function vueAccueil() {
-  const r = R(), maintenant = new Date(), heure = maintenant.getHours();
+  const r = R(), maintenant = new Date();
   const genere = r.genere_le ? new Date(r.genere_le) : null;
   const vieux = genere && (maintenant - genere) > 3 * JOUR_MS;
   const b = bilanDe("novice"), mes = D.mes_positions.ouvertes || [];
-  const nov = r.novice || {};
   const c = courbes(), a = aligner({novice: c.novice, hasard: c.hasard || [], indice: c.indice || []});
   const dernierHasard = a.out.hasard.at(-1) ?? 0, dernierIndice = a.out.indice.at(-1) ?? 0;
   const top = (r.short_list || []).slice().sort((x, y) => (y.score_global || 0) - (x.score_global || 0)).slice(0, 3);
-  const meilleur = top[0];
-
-  let mouvements = [
-    ...(nov.achats_demain || []).map(t => `<div class="li tappable" data-fiche="${esc(t)}"><div class="logo">${esc(t)}</div><div class="t"><b>${esc(nomDe(t))}</b><span>achat demain à l'ouverture · 300 €</span></div><span class="chip in">Entrée</span></div>`),
-    ...(nov.ventes_demain || []).map(t => `<div class="li tappable" data-fiche="${esc(t)}"><div class="logo">${esc(t)}</div><div class="t"><b>${esc(nomDe(t))}</b><span>deuxième clôture sous le niveau de vente</span></div><span class="chip out">Sortie</span></div>`)];
-  if (!mouvements.length) mouvements = [`<div class="li"><div class="t"><b>Aucun mouvement ce soir</b><span>Aucun titre n'a réuni tes conditions, et aucune position ne doit être vendue.</span></div></div>`];
-
-  const messageNovice = (b.positions_ouvertes || b.achats_en_attente || b.operations_closes)
-    ? `J'ai <b>${b.positions_ouvertes || 0} position${(b.positions_ouvertes || 0) > 1 ? "s" : ""}</b> en cours${b.achats_en_attente ? ` et <b>${b.achats_en_attente}</b> achat${b.achats_en_attente > 1 ? "s" : ""} prévu${b.achats_en_attente > 1 ? "s" : ""} demain` : ""}. ${b.operations_closes ? `${b.operations_closes} opération${b.operations_closes > 1 ? "s" : ""} close${b.operations_closes > 1 ? "s" : ""}, gain net moyen ${pct(b.gain_net_moyen_pct)}.` : "Aucune opération close pour l'instant."}`
-    : meilleur ? `Aucun titre n'a réuni tes conditions ce soir. Le mieux noté, <b>${esc(meilleur.nom)}</b>, fait <b>${nb(meilleur.score_global, 0)}</b> sur 100 (${esc(meilleur.statut || "")}). Je n'achète pas pour acheter.`
-    : "Pas encore de calcul du soir.";
+  const mv = mouvements();
 
   $("#v-accueil").innerHTML = `
-    <div class="hd"><div><div class="over">${dateLongue(maintenant)}</div><h1>${heure >= 18 || heure < 5 ? "Bonsoir" : "Bonjour"} Antoine</h1></div></div>
-    <div style="padding:8px 20px 14px"><span class="pill${vieux ? " old" : ""}"><i></i>Données du ${genere ? dateFr(r.genere_le) + " à " + String(genere.getHours()).padStart(2, "0") + "h" + String(genere.getMinutes()).padStart(2, "0") : "—"}${r.provisoire ? " · provisoire" : ""}</span></div>
-    ${vieux ? `<div class="bandeau">Le calcul du soir n'a pas tourné depuis le ${dateFr(r.genere_le)}. Les chiffres ci-dessous datent de ce jour-là.</div>` : ""}
-    <div class="card tappable" data-go="actions">
-      <div class="row"><span class="over">Tes actions ce soir</span><span class="cta" style="margin:0">Voir ›</span></div>
-      ${mes.length ? mes.map(p => { const v = p.verdict || {}; const cl = v.verdict === "Garder" ? "in" : v.verdict === "Alerte" ? "al" : "out";
-        return `<div class="li" style="padding:12px 0 0;border:0"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom || p.ticker)}</b><span>${esc(v.raison || "")}</span></div><span class="chip ${cl}">${esc(v.verdict || "?")}</span></div>`; }).join("")
-        : `<div class="empty" style="margin-top:8px">Aucune position en cours chez Trade Republic.</div>`}
-    </div>
+    <div class="hd"><div><div class="over">${dateLongue(maintenant)}</div><h1>Aujourd'hui</h1></div>
+      <button class="gear" data-open="appli" aria-label="Réglages de l'appli">${ROUE}</button></div>
+    ${vieux ? `<div class="bandeau" style="margin-top:12px">Le calcul du soir n'a pas tourné depuis le ${dateFr(r.genere_le)}. Les chiffres ci-dessous datent de ce jour-là.</div>` : ""}
+    ${genere ? `<div class="list tappable" id="ouvrirPoint" style="margin-top:14px"><div class="li sans-logo"><div class="t"><b>${titrePoint(r)}</b><span>${dateFr(r.genere_le)} à ${heureDe(r.genere_le)}${r.provisoire ? " · pendant la séance" : ""}</span></div><span class="chev">›</span></div></div>` : ""}
+
+    <h2>Mes actions <small data-go="actions">Tout voir</small></h2>
+    <div class="list">${mes.length ? mes.map(p => { const v = p.verdict || {};
+        return `<div class="li tappable" data-go="actions"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom || p.ticker)}</b><span>${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) + " · " : ""}${esc(v.raison || "")}</span></div>${chipVerdict(v.verdict)}</div>`; }).join("")
+      : `<div class="li sans-logo"><div class="t"><span>Aucune position en cours chez Trade Republic.</span></div></div>`}</div>
+
+    <h2>Portefeuille de Novice</h2>
     <div class="card">
-      <div class="row"><span class="over">Portefeuille de Novice</span><span class="pill">depuis le ${dateFr(D.novice.lance_le)}</span></div>
-      <div style="margin-top:10px" class="big ${classe(gainTotal(b))}">${eur(gainTotal(b))}</div>
-      <div style="margin-top:6px;font-size:13.5px" class="muted">hasard ${eur(dernierHasard)} · indice ${eur(dernierIndice)}</div>
-      ${a.dates.length > 1 ? `<svg id="courbeAccueil" viewBox="0 0 320 130" width="100%" height="130" style="display:block;margin-top:12px"></svg>
-        <div class="legend"><span><i style="background:var(--gold-2)"></i>Novice</span><span><i style="background:var(--grey)"></i>Hasard</span><span><i style="background:var(--dash)"></i>Indice</span></div>`
+      <div class="over">Gain net depuis le ${dateFr(D.novice.lance_le)}</div>
+      <div style="margin-top:8px" class="big ${classe(gainTotal(b))}">${eur(gainTotal(b))}</div>
+      <div style="margin-top:6px;font-size:13.5px" class="muted">Hasard ${eur(dernierHasard)} · Indice ${eur(dernierIndice)}</div>
+      ${a.dates.length > 1 ? `<svg id="courbeAccueil" viewBox="0 0 320 120" width="100%" height="120" style="display:block;margin-top:14px"></svg>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Novice</span><span><i style="background:var(--grey)"></i>Hasard</span><span><i style="background:var(--dash)"></i>Indice</span></div>`
         : `<div class="empty" style="margin-top:12px">La courbe apparaîtra après le premier achat de Novice.</div>`}
+      <div class="stats">
+        <div class="stat"><b>${b.positions_ouvertes || 0}<span style="font-size:12px;color:var(--muted)"> / 20</span></b><span>positions</span></div>
+        <div class="stat"><b>${b.operations_closes || 0}</b><span>opérations closes</span></div>
+        <div class="stat"><b class="${classe(b.gain_net_moyen_pct)}">${pct(b.gain_net_moyen_pct)}</b><span>gain net moyen</span></div>
+      </div>
     </div>
-    <div class="stats">
-      <div class="stat"><b>${b.positions_ouvertes || 0}<span style="font-size:13px;color:var(--muted)"> / 20</span></b><span>positions</span></div>
-      <div class="stat"><b>${b.operations_closes || 0}</b><span>opérations closes</span></div>
-      <div class="stat"><b class="${classe(b.gain_net_moyen_pct)}">${pct(b.gain_net_moyen_pct)}</b><span>gain net moyen</span></div>
-    </div>
-    <h2>Ce soir <small data-go="marches">Tout voir</small></h2>
-    <div class="list">${mouvements.join("")}</div>
-    <div class="list">${top.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>
-    <h2>Novice</h2>
-    <div class="card tappable" data-go="novice"><div class="nov"><div class="avatar">N</div><div class="bubble">${messageNovice}</div></div></div>
-    <div class="foot" style="text-align:center;margin-top:18px"><a href="#" data-deco>Se déconnecter de cet appareil</a></div>`;
+
+    <h2>${r.type === "manuel" ? "Ce scan" : "Ce soir"} <small data-go="marches">Marchés</small></h2>
+    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>Aucun titre n'a réuni tes conditions, aucune position à vendre.</span></div></div>`}</div>
+    <div class="list">${top.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>`;
   const svg = $("#courbeAccueil");
-  if (svg) traceLignes(svg, [{d: a.out.novice, c: css("--gold-2"), w: 2.4}, {d: a.out.hasard, c: css("--grey")}, {d: a.out.indice, c: css("--dash"), dash: 1}], 316, 128, 0);
+  if (svg) traceLignes(svg, [{d: a.out.novice, c: css("--accent"), w: 2}, {d: a.out.hasard, c: css("--grey")}, {d: a.out.indice, c: css("--dash"), dash: 1}], 316, 118, 0);
+  const o = $("#ouvrirPoint"); if (o) o.onclick = () => pointDuSoir(true);
+}
+
+// ------------------------------------------------------------------ Le point du soir
+// Page plein écran qui s'ouvre d'elle-même la première fois qu'on ouvre
+// l'appli après un nouveau calcul. Elle n'est montrée qu'une fois : le calcul
+// suivant la remplace. On la retrouve en haut de l'Accueil.
+async function pointDuSoir(force = false) {
+  const r = R();
+  if (!r.genere_le || $(".point")) return;
+  if (!force) {
+    if ((await sortir("point_auto")) === false || (await sortir("point_vu")) === r.genere_le) return;
+    await ranger("point_vu", r.genere_le);
+  }
+  const regimes = Object.entries(r.regimes || {}), sp = (r.regimes || {})["^GSPC"] || "VERT";
+  const compte = c => regimes.filter(([, v]) => v === c).length;
+  const mes = D.mes_positions.ouvertes || [];
+  const mv = mouvements();
+  const top = (r.short_list || []).slice().sort((x, y) => (y.score_global || 0) - (x.score_global || 0)).slice(0, 3);
+  // À retenir : ce que Claude a trouvé de plus concret sur les titres qui comptent ce soir.
+  const nov = r.novice || {};
+  const suivis = [...new Set([...(nov.achats_maintenant || []), ...(nov.achats_demain || []), ...mes.map(p => p.ticker), ...top.map(t => t.ticker)])];
+  const faits = suivis.flatMap(t => { const l = (D.lectures || {})[t] || {}, sortie = [];
+    if (l.catalyseur_evenement) sortie.push([t, l.catalyseur_evenement + (l.catalyseur_date ? ` (${dateFr(l.catalyseur_date)})` : "")]);
+    if (l.guidance && l.guidance !== "inconnue" && l.guidance_justification) sortie.push([t, l.guidance_justification]);
+    return sortie.slice(0, 1); }).slice(0, 5);
+  const b = bilanDe("novice");
+
+  const page = document.body.appendChild(Object.assign(document.createElement("div"), {className: "point"}));
+  page.innerHTML = `<div class="in">
+    <button class="fermer" aria-label="Fermer">×</button>
+    <div class="hd"><div><div class="over">${dateLongue(new Date(r.genere_le))} · ${heureDe(r.genere_le)}</div><h1>${titrePoint(r)}</h1></div></div>
+    ${r.provisoire ? `<div class="foot" style="margin:6px 20px 0">Scan pendant la séance : les cours du jour bougent encore.</div>` : ""}
+
+    <h2>Marché</h2>
+    <div class="card"><div class="climat"><span class="feu ${esc(sp)}"></span><div><b style="font-size:15px">S&amp;P 500 en régime ${esc(sp.toLowerCase())}</b>
+      <div class="note">${compte("VERT")} indices verts, ${compte("ORANGE")} orange, ${compte("ROUGE")} rouges. ${sp === "ROUGE" ? "Aucun achat possible." : sp === "ORANGE" ? "Seuil d'achat relevé à 73." : "Seuil d'achat à 68."}</div></div></div></div>
+
+    <h2>Novice</h2>
+    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>${top[0] ? `Le mieux noté, ${esc(top[0].nom)}, fait ${nb(top[0].score_global, 0)} sur 100${top[0].statut === "conditions réunies" ? "" : ", sous le seuil"}.` : "Pas de short list."}</span></div></div>`}</div>
+    <div class="foot" style="margin-top:0">${b.positions_ouvertes || 0} position${(b.positions_ouvertes || 0) > 1 ? "s" : ""} en cours · gain net ${eur(gainTotal(b))}${b.operations_closes ? ` · ${b.operations_closes} opérations closes, ${pct(b.gain_net_moyen_pct)} en moyenne` : ""}</div>
+
+    ${mes.length ? `<h2>Mes actions</h2><div class="list">${mes.map(p => { const v = p.verdict || {};
+      return `<div class="li"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom || p.ticker)}</b><span>${esc(v.raison || "")}</span></div>${chipVerdict(v.verdict)}</div>`; }).join("")}</div>` : ""}
+
+    <h2>Les mieux notés</h2>
+    <div class="list">${top.map(t => `<div class="li"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>
+
+    ${faits.length ? `<h2>À retenir</h2><div class="list">${faits.map(([t, x]) => `<div class="li"><div class="logo">${esc(t)}</div><div class="t"><span style="color:var(--ink);font-size:14px;line-height:1.4;display:block">${esc(x)}</span></div></div>`).join("")}</div>
+      <div class="foot" style="margin-top:0">Lu sur le web par Claude pendant le calcul.</div>` : ""}
+
+    <button class="btn">Continuer</button>
+  </div>`;
+  const fermer = () => page.remove();
+  page.querySelector(".fermer").onclick = fermer;
+  page.querySelector(".btn").onclick = fermer;
 }
 
 // ------------------------------------------------------------------ Novice
@@ -675,11 +847,11 @@ function vueNovice() {
   const b = bilanDe("novice");
   $("#v-novice").innerHTML = `
     <div class="hd"><div class="row" style="gap:14px;justify-content:flex-start"><div class="avatar lg">N</div><div><h1>Novice</h1><div class="over">Ta méthode, appliquée chaque soir</div></div></div>
-      <button class="gear" data-open="reglages" aria-label="Réglages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      <button class="gear" data-open="regles" aria-label="Règles de Novice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Règles</button>
     </div>
     <div style="padding:0 16px"><div class="seg"><button class="on" data-s="nov-apercu">Aperçu</button><button data-s="nov-adapt">Adaptation</button></div></div>
     <div id="nov-apercu">
-      <div class="card" style="margin-top:14px"><div class="bubble">Chaque soir, j'applique <b>ta méthode du scan global</b> : régime des indices, filtre technique sur ${nb(R().univers_analyse, 0)} titres, puis tes <b>six questions</b> sur les 10 premiers, lues sur le web par Claude. J'achète ceux qui font <b>68 ou plus</b> (73 en régime orange), jusqu'à 20 positions de 300 €. Je vends sur tes règles : stop à 4 ATR, deux clôtures sous le niveau de vente, butoir à 6 mois.</div>
+      <div class="card" style="margin-top:14px"><div class="bubble">Chaque soir, j'applique <b>ta méthode du scan global</b> : régime des indices, filtre technique sur ${nb(R().univers_analyse, 0)} titres, puis tes <b>six questions</b> sur les 10 premiers, lues sur le web par Claude. J'achète ceux qui font <b>68 ou plus</b> (73 en régime orange), jusqu'à 20 positions de 300 €, le soir ou après un scan que tu lances. Je vends sur tes règles : stop à 4 ATR, deux clôtures sous le niveau de vente, butoir à 6 mois.</div>
         <div class="msgs" id="msgs"></div>
         <div class="sugg" id="sugg"><button>Pourquoi aucun achat ce soir ?</button><button>Explique la note du mieux classé</button><button>Où en est le Labo ?</button></div>
         <div class="chat"><input id="chatIn" placeholder="Pose-moi une question…" enterkeyhint="send"><button id="chatGo" aria-label="Envoyer">↑</button></div>
@@ -712,7 +884,7 @@ function vueNovice() {
     ${bloc("Vendues", pos.filter(p => p.etat === "vendue"), p => `<div class="li tappable" data-fiche="${esc(p.ticker)}"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom)}</b><span>${dateFr(p.date_entree)} → ${dateFr(p.date_sortie)} · ${esc(p.motif)}</span></div><div class="r ${classe(p.gain_eur)}">${pct(p.gain_pct)}<span>${eur(p.gain_eur, 2)}</span></div></div>`)}`;
 
   const regle = (l, v) => `<div class="set">${l}<span class="v">${v}</span></div>`;
-  $("#s-reglages").innerHTML = `<button class="back" data-close>‹ Novice</button><div class="hd"><h1>Réglages</h1></div>
+  $("#s-regles").innerHTML = `<button class="back" data-close>‹ Novice</button><div class="hd"><h1>Règles de Novice</h1></div>
     <div class="foot" style="margin-top:4px">Ta méthode du scan global, telle que Novice l'applique. Les modifier depuis l'appli arrivera avec les essais (Novice bis).</div>
     <div class="group-t">Six questions · fondamental sur 100</div>
     <div class="list">${regle("Q1 Résultats et guidance", "30 pts") + regle("Q2 Potentiel analystes (plein à 12 %)", "20 pts") + regle("Q3 Momentum sectoriel", "12 pts") + regle("Q4 Catalyseur à 90 jours", "15 pts") + regle("Q5 Force relative", "13 pts") + regle("Q6 Risques", "10 pts")}</div>
@@ -720,10 +892,44 @@ function vueNovice() {
     <div class="list">${regle("Poids fondamental / technique", "60 / 40") + regle("Seuil d'achat", "68") + regle("Seuil en régime orange", "73") + regle("Écarter si résultats sous", "7 séances") + regle("Positions maximum", "20 × 300 €")}</div>
     <div class="group-t">Sortie</div>
     <div class="list">${regle("Stop posé à l'achat", "4 × ATR14") + regle("Niveau de vente", "MM50 − 1 ATR") + regle("Clôtures sous le niveau", "2") + regle("Butoir", "6 mois")}</div>
-    <div class="group-t">GitHub (pour agir depuis l'appli)</div>
-    <div class="list" id="blocGithub"></div>
+    <div class="group-t">Moment de l'achat</div>
+    <div class="list">${regle("Calcul du soir", "ouverture suivante") + regle("Scan lancé en séance", "cours du moment") + regle("Scan hors séance", "ouverture suivante")}</div>
     <div class="group-t">Hypothèses de coût</div>
     <div class="list">${regle("Frais Trade Republic", "1 € + 1 €") + regle("Écart achat / vente", "0,1 % par côté") + regle("Change", "cours du jour")}</div>`;
+}
+
+// ------------------------------------------------------------------ Réglages de l'appli
+// Tout ce qui concerne l'appli elle-même (et non la méthode de Novice).
+async function vueAppli() {
+  const r = R(), faceId = !!(await sortir("faceid")), fidPossible = await faceIdPossible();
+  const pointAuto = (await sortir("point_auto")) !== false;
+  const inter = (id, on) => `<label class="switch"><input type="checkbox" id="${id}"${on ? " checked" : ""}><i></i></label>`;
+  $("#s-appli").innerHTML = `<button class="back" data-close>‹ Accueil</button><div class="hd"><h1>Réglages</h1></div>
+    <div class="group-t">Affichage</div>
+    <div class="list"><div class="set"><span>Point du soir à l'ouverture</span>${inter("optPoint", pointAuto)}</div></div>
+    <div class="foot">Montré une fois après chaque nouveau calcul, puis rangé en haut de l'Accueil.</div>
+    <div class="group-t">Sécurité</div>
+    <div class="list">
+      ${fidPossible ? `<div class="set"><span>Face ID</span>${inter("optFace", faceId)}</div>` : `<div class="set">Face ID<span class="v">indisponible ici</span></div>`}
+      <div class="set"><a href="#" data-deco class="danger">Se déconnecter de cet appareil</a></div>
+    </div>
+    <div class="group-t">GitHub</div>
+    <div class="list" id="blocGithub"></div>
+    <div class="foot">Permet de lancer un scan et d'enregistrer tes achats et ventes depuis l'appli.</div>
+    <div class="group-t">Données</div>
+    <div class="list">
+      <div class="set">Dernier calcul<span class="v">${r.genere_le ? dateFr(r.genere_le) + " à " + heureDe(r.genere_le) : "—"}</span></div>
+      <div class="set">Durée<span class="v">${r.duree_secondes ? minutes(r.duree_secondes) : "—"}</span></div>
+      <div class="set">Titres analysés<span class="v">${nb(r.univers_analyse, 0)}</span></div>
+    </div>`;
+  $("#optPoint").onchange = e => ranger("point_auto", e.target.checked);
+  const f = $("#optFace");
+  if (f) f.onchange = async e => {
+    if (e.target.checked) {
+      try { if (!CLE) throw 0; await memoriser(CLE); await activerFaceId(); toast("Face ID activé."); }
+      catch (x) { e.target.checked = false; toast("Activation annulée ou impossible."); }
+    } else { await ranger("faceid", null); toast("Face ID désactivé."); }
+  };
   blocGithub();
 }
 
@@ -767,7 +973,7 @@ function fiche(t) {
     <div class="hd"><div class="row" style="gap:12px;justify-content:flex-start"><div class="logo" style="width:48px;height:48px">${esc(t)}</div><div><h1 style="font-size:26px">${esc(nomDe(t))}</h1><div class="over">${esc(t)}${s.secteur ? " · " + esc(s.secteur) : ""}</div></div></div></div>
     <div class="card" style="margin-top:12px">
       <div class="row"><div><div class="big" style="font-size:32px">${der ? nb(der[1], 2) : "—"} <span style="font-size:15px" class="muted">${esc(s.devise || "")}</span></div><div style="font-size:14px;margin-top:4px"><b class="${classe(varJ)}">${pct(varJ)}</b> <span class="muted">dernière séance</span></div></div>${pos ? `<span class="pill">Novice · ${esc(pos.etat)}</span>` : ""}</div>
-      ${cours.length > 1 ? `<svg id="courbeFiche" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:12px"></svg><div class="legend"><span><i style="background:var(--gold-2)"></i>Cours</span><span><i style="background:var(--warn)"></i>Niveau de vente (MM50 − ATR)</span></div>` : ""}
+      ${cours.length > 1 ? `<svg id="courbeFiche" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:12px"></svg><div class="legend"><span><i style="background:var(--accent)"></i>Cours</span><span><i style="background:var(--warn)"></i>Niveau de vente (MM50 − ATR)</span></div>` : ""}
     </div>
     ${g ? `<h2>Score global</h2><div class="card">
       <div class="row"><div class="score"><b>${nb(g.score_global, 0)}</b><span class="muted">/ 100</span></div><span class="chip ${statut === "conditions réunies" ? "in" : statut === "sous surveillance" ? "al" : "neutre"}">${esc(statut)}</span></div>
@@ -785,7 +991,7 @@ function fiche(t) {
     ${((D.actus || {})[t] || []).length ? `<h2>Actus</h2><div class="list news">${D.actus[t].map(a => `<a class="li" href="${lien(a.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit"><div class="t"><span class="kind">${esc(a.source || "")}</span><b>${esc(a.titre)}</b><span>${dateFr(a.date)}</span></div></a>`).join("")}</div>` : ""}`;
   ouvrir("fiche");
   const svg = $("#courbeFiche");
-  if (svg) traceLignes(svg, [{d: cours.map(c => c[1]), c: css("--gold-2"), w: 2.2}, {d: cours.map(c => c[2]), c: css("--warn"), dash: 1}], 316, 148);
+  if (svg) traceLignes(svg, [{d: cours.map(c => c[1]), c: css("--accent"), w: 2.2}, {d: cours.map(c => c[2]), c: css("--warn"), dash: 1}], 316, 148);
 }
 
 // ------------------------------------------------------------------ Mes actions
@@ -801,9 +1007,9 @@ function vueActions() {
       return `<div class="card" style="margin-top:14px">
         <div class="row"><div class="row" style="gap:12px;justify-content:flex-start"><div class="logo">${esc(p.ticker)}</div><div><b style="font-size:16px">${esc(p.nom || p.ticker)}</b><div class="over" style="font-size:12px">acheté ${nb(p.prix, 2)} le ${dateFr(p.date_achat)}${v.seances ? " · séance " + v.seances : ""}</div></div></div>
           <b class="${classe(v.dernier_cours / p.prix - 1)}" style="font-size:17px">${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) : "—"}</b></div>
-        <div class="verdict v-${esc(v.verdict)}"><span class="ic">${v.verdict === "Garder" ? "✓" : v.verdict === "Alerte" ? "!" : "×"}</span><div><b>${esc(v.verdict || "?")}</b><span>${esc(v.raison || "")}</span></div></div>
+        <div class="verdict v-${esc(v.verdict)}"><span class="ic"></span><div><b>${esc(v.verdict || "?")}</b><span>${esc(v.raison || "")}</span></div></div>
         <div class="levels"><div><b>${nb(v.niveau_vente, 2)}</b><span>niveau de vente</span></div><div><b>${nb(v.stop, 2)}</b><span>stop 4 ATR</span></div><div><b>${pct(v.marge_avant_sortie_pct)}</b><span>marge avant sortie</span></div></div>
-        <div class="row" style="margin-top:12px"><a href="#" data-fiche="${esc(p.ticker)}" style="font-size:13px">Graphique et actus</a><button class="scanbtn" data-vente="${esc(p.ticker)}">J'ai vendu</button></div>
+        <div class="row" style="margin-top:12px"><a href="#" data-fiche="${esc(p.ticker)}" style="font-size:13px">Graphique et actus</a><button class="scanbtn sec" data-vente="${esc(p.ticker)}">J'ai vendu</button></div>
       </div>`; }).join("")
       : `<div class="card" style="margin-top:14px"><div class="empty">Aucune position en cours. Quand tu achètes chez Trade Republic, touche <b>+ Achat</b> : Novice calculera ton stop, ton niveau de vente et te donnera un verdict chaque soir.</div></div>`}
     <h2>Mes ventes</h2>
@@ -825,10 +1031,10 @@ function vueLabo() {
     <div style="padding:0 16px"><div class="seg"><button class="on" data-s="lab-pf">Portefeuilles</button><button data-s="lab-bilan">Bilan</button></div></div>
     <div id="lab-pf">
       <div class="card" style="margin-top:14px"><div class="row"><span class="over">Gain en euros depuis le lancement</span></div>
-        ${a.dates.length > 1 ? `<svg id="courbeLabo" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:10px"></svg><div class="legend"><span><i style="background:var(--gold-2)"></i>Novice</span><span><i style="background:var(--grey)"></i>les autres</span></div>` : `<div class="empty" style="margin-top:10px">Les courbes apparaîtront après les premiers achats.</div>`}</div>
+        ${a.dates.length > 1 ? `<svg id="courbeLabo" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:10px"></svg><div class="legend"><span><i style="background:var(--accent)"></i>Novice</span><span><i style="background:var(--grey)"></i>les autres</span></div>` : `<div class="empty" style="margin-top:10px">Les courbes apparaîtront après les premiers achats.</div>`}</div>
       <h2>Classement</h2>
       <div class="list lb">${tri.map(k => { const b = bilanDe(k); const n = b.operations_closes || 0;
-        return `<div class="li tappable" data-strat="${k}"><span class="dotc" style="background:${k === "novice" ? css("--gold-2") : col(COULEURS[k] || "--grey")}"></span><div class="t"><b>${NOMS[k] || k}${TEMOINS.includes(k) ? '<span class="temoin">TÉMOIN</span>' : ""}</b><span>${n} opérations closes · ${(b.positions_ouvertes || 0) + (b.achats_en_attente || 0)} en cours · ${n >= 100 ? "comparaison possible" : "trop tôt"}</span></div><div class="r ${classe(b.gain_net_moyen_pct)}">${pct(b.gain_net_moyen_pct)}<span>${eur(gainTotal(b))}</span></div></div>`; }).join("")}</div>
+        return `<div class="li tappable" data-strat="${k}"><span class="dotc" style="background:${k === "novice" ? css("--accent") : col(COULEURS[k] || "--grey")}"></span><div class="t"><b>${NOMS[k] || k}${TEMOINS.includes(k) ? '<span class="temoin">TÉMOIN</span>' : ""}</b><span>${n} opérations closes · ${(b.positions_ouvertes || 0) + (b.achats_en_attente || 0)} en cours · ${n >= 100 ? "comparaison possible" : "trop tôt"}</span></div><div class="r ${classe(b.gain_net_moyen_pct)}">${pct(b.gain_net_moyen_pct)}<span>${eur(gainTotal(b))}</span></div></div>`; }).join("")}</div>
       <div class="foot" style="margin-top:0">Classé par gain net moyen par opération, frais compris, 300 € par position partout. Une stratégie qui ne bat pas le hasard et l'indice n'apporte rien.</div>
     </div>
     <div id="lab-bilan" hidden>
@@ -846,7 +1052,7 @@ function vueLabo() {
   function tracerLabo(focus) {
     const svg = $("#courbeLabo"); if (!svg) return;
     const ordre = cles.slice().sort((x, y) => (x === "novice") - (y === "novice") || (x === focus) - (y === focus));
-    traceLignes(svg, ordre.map(k => ({d: a.out[k], c: k === "novice" ? css("--gold-2") : k === focus ? col(COULEURS[k]) : css("--grey"),
+    traceLignes(svg, ordre.map(k => ({d: a.out[k], c: k === "novice" ? css("--accent") : k === focus ? col(COULEURS[k]) : css("--grey"),
       w: k === "novice" ? 2.6 : k === focus ? 2 : 1.2, o: k === "novice" || k === focus ? 1 : .35, dash: TEMOINS.includes(k)})).reverse(), 316, 148);
   }
   vueLabo.tracer = tracerLabo;
