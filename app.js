@@ -564,6 +564,58 @@ function demanderMotDePasse() {
   });
 }
 
+// ------------------------------------------------------------------ Parler à Novice
+// La question part sur GitHub (workflow « Question à Novice ») ; Claude
+// répond avec les données du soir et écrit la réponse dans le dépôt privé,
+// où l'appli vient la lire. L'historique reste sur ce téléphone.
+async function conversation() { return (await sortir("conversation")) || []; }
+async function afficherConversation() {
+  const m = $("#msgs"); if (!m) return;
+  const c = await conversation();
+  m.innerHTML = c.slice(-12).map(x => `<div class="msg moi">${esc(x.q)}</div>` + (x.r
+    ? `<div class="msg novice">${esc(x.r).replace(/
+/g, "<br>")}${(x.sources || []).length ? `<div class="sources" style="margin-top:6px">${x.sources.slice(0, 3).map(s => `<a href="${lien(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.titre || s.url)}</a>`).join("")}</div>` : ""}</div>`
+    : `<div class="msg novice attente">Je réfléchis… (1 à 2 minutes)</div>`)).join("");
+}
+async function poser(question) {
+  question = question.trim().slice(0, 500);
+  if (!question || !await exigerJeton()) return;
+  const id = Date.now().toString(36) + "-" + [...aleatoire(4)].map(x => x.toString(16).padStart(2, "0")).join("");
+  const c = await conversation();
+  c.push({id, q: question, r: null});
+  await ranger("conversation", c.slice(-30));
+  afficherConversation();
+  try {
+    await gh("/actions/workflows/question.yml/dispatches", {method: "POST", body: JSON.stringify({ref: "main", inputs: {question, id}})});
+    attendreReponse(id);
+  } catch (e) { await noter(id, {r: "Question non envoyée : " + e.message}); }
+}
+async function noter(id, champs) {
+  const c = await conversation();
+  const x = c.find(y => y.id === id); if (x) Object.assign(x, champs);
+  await ranger("conversation", c); afficherConversation();
+}
+async function attendreReponse(id) {
+  for (let i = 0; i < 36; i++) {          // jusqu'à 6 minutes
+    await new Promise(ok => setTimeout(ok, 10000));
+    try {
+      const f = await gh(`/contents/donnees/reponses/${id}.json?ref=main`);
+      const r = JSON.parse(depuisB64(f.content));
+      return noter(id, {r: r.reponse || "Réponse vide.", sources: r.sources || []});
+    } catch (e) { if (!String(e.message).includes("404")) break; }
+  }
+  noter(id, {r: "Pas de réponse pour l'instant. Rouvre l'appli plus tard : elle ira la chercher."});
+}
+function brancherConversation() {
+  const envoyer = () => { const v = $("#chatIn").value; $("#chatIn").value = ""; poser(v); };
+  $("#chatGo").onclick = envoyer;
+  $("#chatIn").onkeydown = e => { if (e.key === "Enter") envoyer(); };
+  $$("#sugg button").forEach(b => b.onclick = () => poser(b.textContent));
+  afficherConversation();
+  // Reprend l'attente des questions restées sans réponse (appli fermée entre-temps).
+  conversation().then(c => c.filter(x => !x.r || x.r.startsWith("Pas de réponse pour l'instant")).forEach(x => attendreReponse(x.id)));
+}
+
 // ------------------------------------------------------------------ Accueil
 function vueAccueil() {
   const r = R(), maintenant = new Date(), heure = maintenant.getHours();
@@ -629,7 +681,10 @@ function vueNovice() {
     <div style="padding:0 16px"><div class="seg"><button class="on" data-s="nov-apercu">Aperçu</button><button data-s="nov-adapt">Adaptation</button></div></div>
     <div id="nov-apercu">
       <div class="card" style="margin-top:14px"><div class="bubble">Chaque soir, j'applique <b>ta méthode du scan global</b> : régime des indices, filtre technique sur ${nb(R().univers_analyse, 0)} titres, puis tes <b>six questions</b> sur les 10 premiers, lues sur le web par Claude. J'achète ceux qui font <b>68 ou plus</b> (73 en régime orange), jusqu'à 20 positions de 300 €. Je vends sur tes règles : stop à 4 ATR, deux clôtures sous le niveau de vente, butoir à 6 mois.</div>
-        <div class="empty" style="margin-top:12px">Me poser des questions : bientôt.</div></div>
+        <div class="msgs" id="msgs"></div>
+        <div class="sugg" id="sugg"><button>Pourquoi aucun achat ce soir ?</button><button>Explique la note du mieux classé</button><button>Où en est le Labo ?</button></div>
+        <div class="chat"><input id="chatIn" placeholder="Pose-moi une question…" enterkeyhint="send"><button id="chatGo" aria-label="Envoyer">↑</button></div>
+        <div class="foot" style="margin:8px 0 0">Je réponds en 1 à 2 minutes : je relis mes données du soir et je cherche sur le web si besoin.</div></div>
       <h2>Mon travail</h2>
       <div class="card tappable" data-open="resultats">
         <div class="row"><span class="over">Depuis le ${dateFr(D.novice.lance_le)}</span><span class="cta" style="margin:0">Tout voir ›</span></div>
@@ -647,6 +702,7 @@ function vueNovice() {
       <div class="card" style="margin-top:14px"><div class="empty">L'apprentissage de Novice commencera quand il aura assez d'opérations closes pour qu'un constat ne soit pas dû au hasard. Chaque constat devra passer la vérification statistique avant d'apparaître ici, et chaque idée sera testée à part (Novice bis) sans rien changer à Novice.</div></div>
     </div>`;
   segments($("#v-novice"), ["nov-apercu", "nov-adapt"]);
+  brancherConversation();
 
   const pos = D.novice.positions || [];
   const bloc = (titre, liste, rendu) => liste.length ? `<div class="group-t">${titre} · ${liste.length}</div><div class="list">${liste.map(rendu).join("")}</div>` : "";
