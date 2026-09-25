@@ -121,7 +121,7 @@ async function verifierFaceId() {
 function ecranVerrou(suite) {
   const cache = document.createElement("div");
   cache.className = "verrou";
-  cache.innerHTML = `<div class="connexion"><div class="avatar lg">N</div><h1>Novice</h1><div class="over">Verrouillée</div>
+  cache.innerHTML = `<div class="connexion"><div class="avatar lg">${MARQUE()}</div><h1>Novice</h1><div class="over">Verrouillée</div>
     <button class="btn" id="btnFace">Déverrouiller avec Face ID</button>
     <div class="erreur" id="erreurFace"></div>
     <div class="foot" style="margin:18px 0 0;text-align:center"><a href="#" id="parPhrase">Utiliser le mot de passe</a></div></div>`;
@@ -147,7 +147,7 @@ setInterval(async () => {
 function proposerFaceId() {
   const cache = document.createElement("div");
   cache.className = "verrou";
-  cache.innerHTML = `<div class="connexion"><div class="avatar lg">N</div><h1>Face ID</h1>
+  cache.innerHTML = `<div class="connexion"><div class="avatar lg">${MARQUE()}</div><h1>Face ID</h1>
     <div class="bubble" style="margin-top:10px">Verrouiller Novice avec Face ID à chaque ouverture et après 15 minutes sans t'en servir ? Tu n'auras plus à taper ton mot de passe pendant 30 jours.</div>
     <button class="btn" id="oui">Activer Face ID</button><div class="erreur" id="erreurFace"></div>
     <div class="foot" style="margin:18px 0 0;text-align:center"><a href="#" id="non">Plus tard</a></div></div>`;
@@ -208,7 +208,7 @@ function apresOuverture() {
 
 function ecranConnexion(message = "") {
   $("#app").innerHTML = `<form class="connexion" id="formCo">
-    <div class="avatar lg">N</div>
+    <div class="avatar lg">${MARQUE()}</div>
     <h1>Novice</h1>
     <div class="over">Ta méthode, appliquée chaque soir.</div>
     <input type="text" name="username" value="antoine" autocomplete="username" hidden aria-hidden="true">
@@ -283,6 +283,15 @@ function traceLignes(svg, sets, W, H, aireIdx) {
   sets.slice().reverse().forEach(s => h += `<path d="${p(s.d)}" fill="none" stroke="${s.c}" stroke-width="${s.w || 1.6}" ${s.dash ? 'stroke-dasharray="4 3"' : ""} opacity="${s.o ?? 1}" stroke-linecap="round" stroke-linejoin="round"/>`);
   svg.innerHTML = h;
 }
+
+// Le logo (2b, choisi le 25/09) : un N plein, tranché par une diagonale
+// montante dont la partie haute glisse vers le haut, comme un prix qui
+// franchit sa moyenne.
+const MARQUE = (couleur = "#16233F", fond = "#FFFFFF") => `<svg viewBox="0 0 120 120" width="100%" height="100%" aria-hidden="true">
+  <defs><clipPath id="mh"><polygon points="0,0 122,0 0,122"/></clipPath><clipPath id="mb"><polygon points="122,0 130,130 0,122"/></clipPath></defs>
+  <g clip-path="url(#mb)"><path d="M31 93V27h17.5l23 39V27H89v66H71.5l-23-39v39z" fill="${couleur}"/></g>
+  <g clip-path="url(#mh)" transform="translate(3.5,-3.5)"><path d="M31 93V27h17.5l23 39V27H89v66H71.5l-23-39v39z" fill="${couleur}"/></g>
+  <path d="M14 108L108 14" stroke="${fond}" stroke-width="4"/></svg>`;
 
 // ------------------------------------------------------------------ structure
 const ICONES = {
@@ -823,6 +832,7 @@ const CONSIGNE_NOVICE = `Tu es Novice, l'assistant de swing trading d'Antoine. C
 
 Règles de réponse :
 - Réponds uniquement à partir des données ci-dessous. N'invente rien. Si elles ne permettent pas de répondre (actualité récente, information absente), dis-le en une phrase et indique qu'Antoine peut toucher « Approfondir avec Claude » pour une recherche sur le web.
+- Ton : un associé franc et direct. Tu tutoies Antoine, tu le contredis avec des chiffres quand il a tort, tu ne le flattes jamais.
 - Français, direct, concis : 120 mots au plus sauf si la question demande vraiment plus. Pas d'emoji, pas de préambule, pas de mise en forme Markdown (ni astérisques ni titres).
 - Chiffres d'abord, tirés des données. Rappelle au besoin que peu d'opérations ne prouvent rien.
 - Jamais d'ordre d'achat ou de vente : tu dis ce que disent les règles et les chiffres. La décision reste celle d'Antoine.
@@ -1006,6 +1016,26 @@ function mouvements() {
     ...(nov.ventes_demain || []).map(t => ligne(t, "deuxième clôture sous le niveau de vente", '<span class="chip out">Vente</span>'))];
 }
 
+// Décisions du jour : la première chose que voit Antoine (questionnaire du 25/09).
+function carteDuJour(r, genere) {
+  if (!genere) return "";
+  const nov = r.novice || {}, pos = D.novice.positions || [];
+  const trouve = t => pos.find(x => x.ticker === t && x.etat !== "vendue") || {};
+  const achats = [...(nov.achats_maintenant || []), ...(nov.achats_demain || [])].map(t => { const p = trouve(t);
+    return {t, texte: p.prix_entree ? `acheté ${nb(p.prix_entree, 2)} le ${dateFr(p.date_entree)} · score ${nb(p.score_global, 0)}` : `achat à l'ouverture · score ${nb(p.score_global, 0)}`, type: "achat"}; });
+  const ventes = (nov.ventes_demain || []).map(t => ({t, texte: "deux clôtures sous le niveau de vente", type: "vente"}));
+  const tout = [...achats, ...ventes], surv = surveillance();
+  const titre = !tout.length ? "Aucun achat, aucune vente"
+    : tout.length === 1 ? `Novice ${tout[0].type === "achat" ? "achète" : "vend"} ${esc(nomDe(tout[0].t))}`
+    : `${achats.length} achat${achats.length > 1 ? "s" : ""}, ${ventes.length} vente${ventes.length > 1 ? "s" : ""}`;
+  const lignes = tout.length ? tout.map(x => `<div class="ligne tappable" data-fiche="${esc(x.t)}"><div class="rond">${esc(x.t)}</div><div><b>${esc(nomDe(x.t))}</b><span>${x.texte}</span></div><span class="tag${x.type === "vente" ? " vente" : ""}">${x.type === "achat" ? "Achat" : "Vente"}</span></div>`).join("")
+    : surv[0] ? `<div class="ligne tappable" data-fiche="${esc(surv[0].ticker)}"><div class="rond">${esc(surv[0].ticker)}</div><div><b>Le plus proche : ${esc(surv[0].nom)}</b><span>${nb(surv[0].score_global, 0)} pour un seuil de ${seuilDe(surv[0])}</span></div></div>` : "";
+  return `<div class="jour">
+    <div class="over">${r.type === "manuel" ? "Scan" : "Calcul du soir"} du ${dateFr(r.genere_le)} à ${heureDe(r.genere_le)}${r.provisoire ? " · en séance" : ""}</div>
+    <h3>${titre}</h3>${lignes}
+    <div class="pied"><span>${surv.length} en surveillance</span><a href="#" id="ouvrirPoint">${titrePoint(r)} ›</a></div></div>`;
+}
+
 function vueAccueil() {
   const r = R(), maintenant = new Date();
   const genere = r.genere_le ? new Date(r.genere_le) : null;
@@ -1020,7 +1050,7 @@ function vueAccueil() {
     <div class="hd"><div><div class="over">${dateLongue(maintenant)}${D.publie_le ? ` · cours de ${heureDe(D.publie_le)}` : ""}</div><h1>Aujourd'hui</h1></div>
       <button class="gear" data-open="appli" aria-label="Réglages de l'appli">${ROUE}</button></div>
     ${vieux ? `<div class="bandeau" style="margin-top:12px">Le calcul du soir n'a pas tourné depuis le ${dateFr(r.genere_le)}. Les chiffres ci-dessous datent de ce jour-là.</div>` : ""}
-    ${genere ? `<div class="list tappable" id="ouvrirPoint" style="margin-top:14px"><div class="li sans-logo"><div class="t"><b>${titrePoint(r)}</b><span>${dateFr(r.genere_le)} à ${heureDe(r.genere_le)}${r.provisoire ? " · pendant la séance" : ""}</span></div><span class="chev">›</span></div></div>` : ""}
+    ${carteDuJour(r, genere)}
 
     <h2>Mes actions <small data-go="actions">Tout voir</small></h2>
     <div class="list">${mes.length ? mes.map(p => { const v = p.verdict || {};
@@ -1042,12 +1072,10 @@ function vueAccueil() {
       </div>
     </div>
 
-    <h2>${r.type === "manuel" ? "Ce scan" : "Ce soir"} <small data-go="marches">Marchés</small></h2>
-    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>Ce calcul n'a décidé ni achat ni vente.</span></div></div>`}</div>
-    ${surveillance().length ? blocSurveillance() : `<div class="list">${top.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>sur 100</span></div></div>`).join("")}</div>`}`;
+    ${blocSurveillance()}`;
   const svg = $("#courbeAccueil");
   if (svg) traceLignes(svg, [{d: a.out.novice, c: css("--accent"), w: 2}, {d: a.out.hasard, c: css("--grey")}, {d: a.out.indice, c: css("--dash"), dash: 1}], 316, 118, 0);
-  const o = $("#ouvrirPoint"); if (o) o.onclick = () => pointDuSoir(true);
+  const o = $("#ouvrirPoint"); if (o) o.onclick = ev => { ev.preventDefault(); pointDuSoir(true); };
 }
 
 // ------------------------------------------------------------------ Le point du soir
@@ -1110,12 +1138,12 @@ async function pointDuSoir(force = false) {
 function vueNovice() {
   const b = bilanDe("novice");
   $("#v-novice").innerHTML = `
-    <div class="hd"><div class="row" style="gap:14px;justify-content:flex-start"><div class="avatar lg">N</div><div><h1>Novice</h1><div class="over">Ta méthode, appliquée chaque soir</div></div></div>
+    <div class="hd"><div class="row" style="gap:14px;justify-content:flex-start"><div class="avatar lg">${MARQUE()}</div><div><h1>Novice</h1><div class="over">Ta méthode, appliquée chaque soir</div></div></div>
       <button class="gear" data-open="regles" aria-label="Règles de Novice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Règles</button>
     </div>
-    <div style="padding:0 16px"><div class="seg"><button class="on" data-s="nov-apercu">Aperçu</button><button data-s="nov-adapt">Adaptation</button></div></div>
+    <div style="padding:0 16px"><div class="seg"><button class="on" data-s="nov-apercu">Aperçu</button><button data-s="nov-essais">Essais</button></div></div>
     <div id="nov-apercu">
-      <div class="card" style="margin-top:14px"><div class="bubble">Chaque soir, j'applique <b>ta méthode du scan global</b> : régime des indices, filtre technique sur ${nb(R().univers_analyse, 0)} titres, puis tes <b>six questions</b> sur les 10 premiers, lues sur le web par Claude. J'achète ceux qui font <b>68 ou plus</b> (73 en régime orange), jusqu'à 20 positions de 300 €, le soir ou après un scan que tu lances. Je vends sur tes règles : stop à 4 ATR, deux clôtures sous le niveau de vente, butoir à 6 mois.</div>
+      <div class="card" style="margin-top:14px"><div class="over">Pose ta question à Novice <button class="aide" type="button" data-aide="chat">?</button></div>
         <div class="msgs" id="msgs"></div>
         <div class="sugg" id="sugg"><button>Pourquoi aucun achat ce soir ?</button><button>Explique la note du mieux classé</button><button>Où en est le Labo ?</button></div>
         <div class="chat"><input id="chatIn" placeholder="Pose-moi une question…" enterkeyhint="send"><button id="chatGo" aria-label="Envoyer">↑</button></div>
@@ -1130,13 +1158,12 @@ function vueNovice() {
           <div><b class="${classe(gainTotal(b))}">${eur(gainTotal(b))}</b><span>gain net, frais compris</span></div>
         </div>
         <div class="prog"><i style="width:${Math.min(100, (b.operations_closes || 0))}%"></i></div>
-        <div class="over" style="margin-top:6px;font-size:12px">${b.operations_closes || 0} opérations closes sur ~100 pour repérer un gros écart. Tant que la barre est courte, c'est surtout du hasard.</div>
+        <div class="over" style="margin-top:6px;font-size:12px">${b.operations_closes || 0} / 100 opérations closes avant de juger</div>
       </div>
     </div>
-    <div id="nov-adapt" hidden>
-      <div class="card" style="margin-top:14px"><div class="empty">L'apprentissage de Novice commencera quand il aura assez d'opérations closes pour qu'un constat ne soit pas dû au hasard. Chaque constat devra passer la vérification statistique avant d'apparaître ici, et chaque idée sera testée à part (Novice bis) sans rien changer à Novice.</div></div>
-    </div>`;
-  segments($("#v-novice"), ["nov-apercu", "nov-adapt"]);
+    <div id="nov-essais" hidden></div>`;
+  segments($("#v-novice"), ["nov-apercu", "nov-essais"]);
+  vueEssais();
   brancherConversation();
 
   const pos = D.novice.positions || [];
@@ -1161,6 +1188,142 @@ function vueNovice() {
     <div class="group-t">Hypothèses de coût</div>
     <div class="list">${regle("Frais Trade Republic", "1 € + 1 €") + regle("Écart achat / vente", "0,1 % par côté") + regle("Change", "cours du jour")}</div>`;
 }
+
+// ------------------------------------------------------------------ Essais (bac à sable)
+// Variantes de la méthode qui tournent à côté de Novice sans jamais le
+// modifier (moteur/essais.py). Novice propose les siennes ; Antoine en crée en
+// ajoutant ou retirant un indicateur. Jugées sur le gain net moyen, « trop
+// tôt » tant qu'il n'y a pas ~100 opérations closes.
+const REGLES_NOVICE = {seuil: 68, poids_fond: 0.6, ignorer: [], stop_atr: 4, sortie_mm50: true, butoir: 126, filtres: []};
+const NOMS_FILTRES = {analystes: "aucune baisse d'objectif d'analyste sur 30 jours", presse: "pas de presse euphorique sur 5 jours"};
+function decrireRegles(r = {}) {
+  const l = [];
+  if (r.seuil != null && r.seuil !== 68) l.push(`seuil d'achat ${r.seuil} au lieu de 68`);
+  if (r.poids_fond != null && r.poids_fond !== 0.6) l.push(`fondamental ${Math.round(r.poids_fond * 100)} % et technique ${Math.round((1 - r.poids_fond) * 100)} %`);
+  if ((r.ignorer || []).length) l.push(`sans ${r.ignorer.map(q => `${q} (${NOMS_Q[q] || q})`).join(", ")}`);
+  if (r.stop_atr != null && r.stop_atr !== 4) l.push(`stop à ${r.stop_atr} ATR`);
+  if (r.sortie_mm50 === false) l.push("pas de sortie sous la MM50");
+  if (r.butoir != null && r.butoir !== 126) l.push(`butoir ${Math.round(r.butoir / 21)} mois`);
+  for (const f of r.filtres || []) l.push(`filtre : ${NOMS_FILTRES[f] || f}`);
+  return l.length ? l.join(" · ") : "règles de Novice";
+}
+function verdictEssai(e, bn) {
+  const b = e.bilan || {}, n = b.operations_closes || 0;
+  if (e.actif === false) return ["Arrêté", ""];
+  if (n < 100 || b.gain_net_moyen_pct == null || bn.gain_net_moyen_pct == null) return ["Trop tôt", ""];
+  return b.gain_net_moyen_pct > bn.gain_net_moyen_pct ? ["Mieux", "mieux"] : ["Moins bien", "moins"];
+}
+function vueEssais() {
+  const el = $("#nov-essais"); if (!el) return;
+  const liste = D.essais || [], bn = bilanDe("novice");
+  el.innerHTML = `<div class="card" style="margin-top:14px"><div class="row"><div><b style="font-size:16px">Ce que Novice essaie</b>
+      <div class="over" style="font-size:12.5px;margin-top:2px">${liste.filter(e => e.actif !== false).length} variante${liste.length > 1 ? "s" : ""} en cours <button class="aide" type="button" data-aide="essais">?</button></div></div>
+      <button class="scanbtn" id="nouvelEssai">+ Essai</button></div></div>
+    <div class="list">${liste.length ? liste.map(e => { const b = e.bilan || {}, [v, cl] = verdictEssai(e, bn);
+      return `<div class="li essai tappable" data-essai="${esc(e.id)}"><div class="logo">${e.par === "Novice" ? "N" : "Toi"}</div><div class="t"><b>${esc(e.nom)}</b>
+        <span>depuis le ${dateFr(e.cree_le)} · ${b.operations_closes || 0} opération${(b.operations_closes || 0) > 1 ? "s" : ""} · ${b.positions_ouvertes || 0} en cours${b.gain_net_moyen_pct != null ? " · " + pct(b.gain_net_moyen_pct) : ""}</span></div><span class="etat ${cl}">${v}</span></div>`; }).join("")
+      : `<div class="li sans-logo"><div class="t"><span>Les premiers essais démarrent au prochain calcul du soir.</span></div></div>`}</div>`;
+  $("#nouvelEssai").onclick = nouvelEssai;
+  el.querySelectorAll("[data-essai]").forEach(x => x.onclick = () => ficheEssai(x.dataset.essai));
+}
+async function ecrireEssais(modif, message) {
+  const f = await gh("/contents/donnees/essais.json?ref=main").catch(e => { if (String(e.message).includes("404")) return null; throw e; });
+  const etat = f ? JSON.parse(depuisB64(f.content)) : {essais: []};
+  modif(etat.essais = etat.essais || []);
+  await gh("/contents/donnees/essais.json", {method: "PUT", body: JSON.stringify({
+    message, branch: "main", ...(f ? {sha: f.sha} : {}), content: versB64(JSON.stringify(etat, null, 1) + "\n")})});
+  return etat.essais;
+}
+function ficheEssai(id) {
+  const e = (D.essais || []).find(x => x.id === id); if (!e) return;
+  const b = e.bilan || {}, bn = bilanDe("novice"), [v] = verdictEssai(e, bn);
+  const {f, fermer} = feuille(`<h3>${esc(e.nom)}</h3>
+    <p>${e.par === "Novice" ? "Proposé par Novice" : "Créé par toi"} le ${dateFr(e.cree_le)}. ${esc(e.idee || "")}</p>
+    <p><b>Ce qui change :</b> ${esc(decrireRegles(e.regles))}.</p>
+    <div class="kpi2" style="margin:14px 0 4px"><div><b>${b.operations_closes || 0}</b><span>opérations closes</span></div><div><b>${b.positions_ouvertes || 0}</b><span>positions en cours</span></div>
+      <div><b class="${classe(b.gain_net_moyen_pct)}">${pct(b.gain_net_moyen_pct)}</b><span>gain net moyen</span></div><div><b class="${classe(bn.gain_net_moyen_pct)}">${pct(bn.gain_net_moyen_pct)}</b><span>Novice</span></div></div>
+    <p style="margin-top:10px">Verdict : <b>${v}</b>${v === "Trop tôt" ? ` (${b.operations_closes || 0} / 100 opérations)` : ""}.</p>
+    <div class="erreur" id="err"></div>
+    <button class="btn" id="bascule">${e.actif === false ? "Relancer l'essai" : "Arrêter l'essai"}</button><button class="btn sec" data-annuler>Fermer</button>`);
+  f.querySelector("#bascule").onclick = async () => {
+    if (!await exigerJeton()) return;
+    const bouton = f.querySelector("#bascule"); bouton.disabled = true;
+    try {
+      const actif = e.actif === false;
+      await ecrireEssais(l => { const x = l.find(y => y.id === id); if (x) x.actif = actif; }, `Essai « ${e.nom} » ${actif ? "relancé" : "arrêté"} depuis l'appli`);
+      e.actif = actif; fermer(); vueEssais(); toast(actif ? "Essai relancé." : "Essai arrêté : ses positions restent visibles.");
+    } catch (x) { f.querySelector("#err").textContent = "Impossible : " + x.message; bouton.disabled = false; }
+  };
+}
+function nouvelEssai() {
+  const choix = (id, options, defaut) => `<select id="${id}">${options.map(([v, l]) => `<option value="${v}"${String(v) === String(defaut) ? " selected" : ""}>${l}</option>`).join("")}</select>`;
+  const seuils = Array.from({length: 19}, (_, i) => 60 + i).map(v => [v, v === 68 ? "68 (Novice)" : String(v)]);
+  const {f, fermer} = feuille(`<h3>Nouvel essai</h3>
+    <p>Change une ou plusieurs règles : l'essai tournera à côté de Novice dès le prochain calcul du soir, sans jamais le modifier.</p>
+    <div class="options">
+      <label class="opt">Seuil d'achat ${choix("oSeuil", seuils, 68)}</label>
+      <label class="opt">Poids du fondamental ${choix("oPoids", [[0.4, "40 %"], [0.5, "50 %"], [0.6, "60 % (Novice)"], [0.7, "70 %"], [0.8, "80 %"]], 0.6)}</label>
+      <div><div style="font-size:14.5px;margin-bottom:6px">Questions retirées</div><div class="coches">${Object.entries(NOMS_Q).map(([k, l]) => `<label><input type="checkbox" value="${k}" class="oQ"> ${k} ${l}</label>`).join("")}</div></div>
+      <label class="opt">Stop ${choix("oStop", [[2, "2 ATR"], [3, "3 ATR"], [4, "4 ATR (Novice)"], [5, "5 ATR"], [6, "6 ATR"]], 4)}</label>
+      <label class="opt">Sortie sous MM50 − ATR ${choix("oSortie", [["oui", "Oui (Novice)"], ["non", "Non"]], "oui")}</label>
+      <label class="opt">Butoir ${choix("oButoir", [[63, "3 mois"], [126, "6 mois (Novice)"], [252, "12 mois"]], 126)}</label>
+      <div><div style="font-size:14.5px;margin-bottom:6px">Filtres ajoutés</div><div class="coches">${Object.entries(NOMS_FILTRES).map(([k, l]) => `<label><input type="checkbox" value="${k}" class="oF"> ${l}</label>`).join("")}</div></div>
+      <label class="champ"><span>Nom (facultatif)</span><input id="oNom" placeholder="Nommé d'après les règles changées"></label>
+    </div>
+    <div class="erreur" id="err"></div>
+    <button class="btn" id="ok">Lancer l'essai</button><button class="btn sec" data-annuler>Annuler</button>`);
+  f.querySelector("#ok").onclick = async () => {
+    const r = {seuil: Number(f.querySelector("#oSeuil").value), poids_fond: Number(f.querySelector("#oPoids").value),
+               ignorer: [...f.querySelectorAll(".oQ:checked")].map(x => x.value), stop_atr: Number(f.querySelector("#oStop").value),
+               sortie_mm50: f.querySelector("#oSortie").value === "oui", butoir: Number(f.querySelector("#oButoir").value),
+               filtres: [...f.querySelectorAll(".oF:checked")].map(x => x.value)};
+    // On ne garde que ce qui diffère de Novice.
+    const regles = Object.fromEntries(Object.entries(r).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(REGLES_NOVICE[k])));
+    const err = f.querySelector("#err");
+    if (!Object.keys(regles).length) return err.textContent = "Change au moins une règle : sinon, c'est Novice.";
+    if (regles.ignorer && regles.ignorer.length === 6) return err.textContent = "Il faut garder au moins une question.";
+    if (!await exigerJeton()) return;
+    const desc = decrireRegles(regles);
+    const essai = {id: "toi-" + Date.now().toString(36), nom: f.querySelector("#oNom").value.trim().slice(0, 60) || desc.charAt(0).toUpperCase() + desc.slice(1),
+                   par: "Antoine", cree_le: aujourdhui(), actif: true, idee: "", regles};
+    const b = f.querySelector("#ok"); b.disabled = true; b.textContent = "Enregistrement…";
+    try {
+      await ecrireEssais(l => l.push(essai), `Nouvel essai depuis l'appli : ${essai.nom}`);
+      D.essais = [...(D.essais || []), essai]; fermer(); vueEssais(); toast("Essai lancé : il démarre au prochain calcul du soir.");
+    } catch (x) { err.textContent = "Impossible : " + x.message; b.disabled = false; b.textContent = "Lancer l'essai"; }
+  };
+}
+
+// ------------------------------------------------------------------ Aides « ? »
+// Les phrases grises d'explication sont cachées (questionnaire du 25/09) : un
+// « ? » à côté du titre le plus proche les affiche à la demande.
+const AIDES = {
+  chat: "Réponse rapide en quelques secondes, à partir des données du dernier calcul. « Approfondir avec Claude » lance une analyse avec recherche web, environ 30 secondes.",
+  labo: "Novice applique tes six questions ; « technique seul » achète la short list sans elles. Il faut environ 100 opérations closes pour qu'un écart de 10 points ne soit pas dû au hasard : avant, c'est trop tôt pour conclure.",
+  essais: "Chaque essai est une variante de ta méthode : une règle changée, un indicateur ajouté ou retiré. Il achète et vend sur les mêmes titres que Novice, à 300 € par position, sans jamais modifier Novice. Verdict après ~100 opérations closes.",
+};
+function aidesAuto() {
+  for (const f of document.querySelectorAll(".foot:not([data-vu])")) {
+    f.dataset.vu = "1";
+    const texte = f.textContent.trim(); if (!texte) continue;
+    let cible = f.previousElementSibling;
+    while (cible && !cible.matches("h2, .group-t, .hd, .card, .list")) cible = cible.previousElementSibling;
+    if (!cible) continue;
+    const titre = cible.matches(".card, .list") ? cible.previousElementSibling : cible;
+    const ou = titre && titre.matches("h2, .group-t") ? titre : null;
+    if (!ou || ou.querySelector(".aide")) continue;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "aide"; b.textContent = "?"; b.dataset.texte = texte; b.setAttribute("aria-label", "Explication");
+    const petit = ou.querySelector("small");
+    if (petit) ou.insertBefore(b, petit); else ou.append(b);
+  }
+}
+new MutationObserver(() => { clearTimeout(aidesAuto.t); aidesAuto.t = setTimeout(aidesAuto, 50); }).observe(document.body, {childList: true, subtree: true});
+document.addEventListener("click", e => {
+  const a = e.target.closest(".aide"); if (!a) return;
+  e.preventDefault(); e.stopPropagation();
+  const {f} = feuille(`<p style="color:var(--ink);font-size:15px;line-height:1.5">${esc(a.dataset.texte || AIDES[a.dataset.aide] || "")}</p><button class="btn sec" data-annuler>Compris</button>`);
+}, true);
 
 // ------------------------------------------------------------------ Réglages de l'appli
 // Tout ce qui concerne l'appli elle-même (et non la méthode de Novice).
@@ -1229,9 +1392,7 @@ function vueMarches() {
         <div class="over" style="font-size:12.5px">Tous indices : ${compte("VERT")} verts, ${compte("ORANGE")} orange, ${compte("ROUGE")} rouges. Seuil d'achat à 73 en orange, aucun achat en rouge.</div></div></div></div>
       ${(() => { const ok = liste.filter(t => t.statut === "conditions réunies");
         return ok.length ? `<h2>Conditions réunies <small style="cursor:default">${ok.length}</small></h2><div class="list">${ok.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || "")}</span></div><div class="r up">${nb(t.score_global, 0)}<span>seuil ${seuilDe(t)}</span></div></div>`).join("")}</div>` : ""; })()}
-      ${blocSurveillance()}
-      <h2>Short list complète</h2>
-      <div class="list">${liste.map((t, i) => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="rank">${i + 1}</div><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span class="chip ${statutChip(t.statut)}" style="display:inline-block;margin-top:4px">${esc(t.statut || "")}</span></div><div class="r">${nb(t.score_global, 0)}<span>score</span></div></div>`).join("")}</div>
+      ${blocSurveillance() || (liste.some(t => t.statut === "conditions réunies") ? "" : `<div class="card"><div class="empty">Aucun titre au-dessus de 55 ce soir.</div></div>`)}
       <div class="foot" style="margin-top:0">Classement par force relative parmi ${nb(r.univers_analyse, 0)} titres, puis six questions sur les 10 premiers. Score global = 0,6 × fondamental + 0,4 × technique.</div>
     </div>
     <div id="mk-act" hidden>
@@ -1314,26 +1475,19 @@ function vueLabo() {
   const marge = n => n ? 1.645 * 60 / Math.sqrt(n) : null;
   $("#v-labo").innerHTML = `
     <div class="hd"><div><div class="over">Qui fait mieux que Novice ?</div><h1>Labo</h1></div></div>
-    <div style="padding:0 16px"><div class="seg"><button class="on" data-s="lab-pf">Portefeuilles</button><button data-s="lab-bilan">Bilan</button></div></div>
     <div id="lab-pf">
+      ${(() => { const n = bn.operations_closes || 0, ecart = (bn.gain_net_moyen_pct ?? null) != null && (bt.gain_net_moyen_pct ?? null) != null ? bn.gain_net_moyen_pct - bt.gain_net_moyen_pct : null;
+        const barre = (lib, v, coul) => `<div style="margin-top:10px"><div class="row" style="font-size:14px"><span>${lib}</span><b class="${classe(v)}">${pct(v)}</b></div><div class="prog"><i style="width:${v == null ? 0 : Math.min(100, Math.abs(v) * 5)}%;background:${coul}"></i></div></div>`;
+        return `<div class="card" style="margin-top:14px"><div class="row"><span class="over">Tes six questions servent-elles ? <button class="aide" type="button" data-aide="labo">?</button></span><span class="chip ${n >= 100 ? (ecart > 0 ? "in" : "out") : "neutre"}">${n >= 100 ? (ecart > 0 ? "Oui" : "Non") : "Trop tôt"}</span></div>
+          ${barre("Novice, avec les questions", bn.gain_net_moyen_pct, "var(--accent)")}${barre("Technique seul, sans elles", bt.gain_net_moyen_pct, "var(--grey)")}
+          <div class="over" style="margin-top:10px;font-size:12px">Gain net moyen par opération · ${n} / 100 opérations closes</div></div>`; })()}
       <div class="card" style="margin-top:14px"><div class="row"><span class="over">Gain en euros depuis le lancement</span></div>
         ${a.dates.length > 1 ? `<svg id="courbeLabo" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:10px"></svg><div class="legend"><span><i style="background:var(--accent)"></i>Novice</span><span><i style="background:var(--grey)"></i>les autres</span></div>` : `<div class="empty" style="margin-top:10px">Les courbes apparaîtront après les premiers achats.</div>`}</div>
       <h2>Classement</h2>
       <div class="list lb">${tri.map(k => { const b = bilanDe(k); const n = b.operations_closes || 0;
         return `<div class="li tappable" data-strat="${k}"><span class="dotc" style="background:${k === "novice" ? css("--accent") : col(COULEURS[k] || "--grey")}"></span><div class="t"><b>${NOMS[k] || k}${TEMOINS.includes(k) ? '<span class="temoin">TÉMOIN</span>' : ""}</b><span>${n} opérations closes · ${(b.positions_ouvertes || 0) + (b.achats_en_attente || 0)} en cours · ${n >= 100 ? "comparaison possible" : "trop tôt"}</span></div><div class="r ${classe(b.gain_net_moyen_pct)}">${pct(b.gain_net_moyen_pct)}<span>${eur(gainTotal(b))}</span></div></div>`; }).join("")}</div>
       <div class="foot" style="margin-top:0">Classé par gain net moyen par opération, frais compris, 300 € par position partout. Une stratégie qui ne bat pas le hasard et l'indice n'apporte rien.</div>
-    </div>
-    <div id="lab-bilan" hidden>
-      <h2>Ta grille vaut-elle quelque chose ?</h2>
-      <div class="card"><div class="bubble" style="font-size:14px">Novice (avec les six questions) contre le <b>top 10 technique seul</b> (sans elles).</div>
-        <div class="kpi2"><div><b class="${classe(bn.gain_net_moyen_pct)}">${pct(bn.gain_net_moyen_pct)}</b><span>Novice, ${bn.operations_closes || 0} opérations</span></div><div><b class="${classe(bt.gain_net_moyen_pct)}">${pct(bt.gain_net_moyen_pct)}</b><span>Technique seul, ${bt.operations_closes || 0} opérations</span></div></div>
-        <div class="empty" style="margin-top:12px">${(bn.operations_closes || 0) < 2 ? "Pas encore assez d'opérations closes pour comparer." : `Marge d'incertitude sur la moyenne de Novice : ±${nb(marge(bn.operations_closes), 0)} points. Tant que l'écart est plus petit, rien n'est prouvé.`}</div></div>
-      <h2>Encore combien d'opérations ?</h2>
-      <div class="card"><div class="row"><b style="font-size:15px">Gros écart (±10 pts)</b><span class="over">${bn.operations_closes || 0} / ~100</span></div><div class="prog"><i style="width:${Math.min(100, bn.operations_closes || 0)}%"></i></div>
-        <div class="row" style="margin-top:14px"><b style="font-size:15px">Écart fin (±3 pts)</b><span class="over">${bn.operations_closes || 0} / ~1 100</span></div><div class="prog"><i style="width:${Math.min(100, (bn.operations_closes || 0) / 11)}%"></i></div>
-        <div class="empty" style="margin-top:10px">Une opération de ce système varie énormément (écart-type d'environ 60 %). Le Labo tranchera les grands écarts en un an environ ; un écart de 1 ou 2 points restera invisible des années.</div></div>
     </div>`;
-  segments($("#v-labo"), ["lab-pf", "lab-bilan"], s => s === "lab-pf" && tracerLabo());
   tracerLabo();
   function tracerLabo(focus) {
     const svg = $("#courbeLabo"); if (!svg) return;
