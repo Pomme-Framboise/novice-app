@@ -709,6 +709,47 @@ function demanderMotDePasse() {
   });
 }
 
+// ------------------------------------------------------------------ Alertes (notifications)
+// Le téléphone s'abonne auprès d'Apple ou Google ; l'adresse d'abonnement est
+// rangée dans le dépôt privé (donnees/abonnements.json), où le robot la lit
+// pour envoyer ses alertes (moteur/alertes.py). Sur iPhone, il faut que Novice
+// soit installée sur l'écran d'accueil (iOS 16.4 ou plus).
+const CLE_VAPID = "BK-B2Fm4I_tp8z_o40a4xlEN6IKfjWkuF9J_yJTSKP7RLp4zIQZz5aINQftZpmAPzllOcVQzM_ChoBmorsuN6Wc";
+const depuisB64url = t => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - t.length % 4) % 4)), c => c.charCodeAt(0));
+const alertesPossibles = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+async function abonnementActuel() {
+  if (!alertesPossibles()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+async function modifierAbonnements(modif, message) {
+  const f = await gh("/contents/donnees/abonnements.json?ref=main").catch(e => { if (String(e.message).includes("404")) return null; throw e; });
+  const liste = f ? JSON.parse(depuisB64(f.content)) : [];
+  const neuve = modif(liste);
+  await gh("/contents/donnees/abonnements.json", {method: "PUT", body: JSON.stringify({
+    message, branch: "main", ...(f ? {sha: f.sha} : {}), content: versB64(JSON.stringify(neuve, null, 1) + "\n")})});
+}
+async function activerAlertes() {
+  if (!await exigerJeton()) throw new Error("annulé");
+  if (!alertesPossibles()) throw new Error(navigator.standalone === false
+    ? "ouvre Novice depuis son icône sur l'écran d'accueil, pas dans Safari"
+    : "ce navigateur ne gère pas les notifications");
+  if (await Notification.requestPermission() !== "granted") throw new Error("autorisation refusée dans les réglages du téléphone");
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription())
+    || await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: depuisB64url(CLE_VAPID)});
+  const j = sub.toJSON();
+  await modifierAbonnements(l => [...l.filter(x => x.endpoint !== j.endpoint),
+    {endpoint: j.endpoint, keys: j.keys, ajoute_le: aujourdhui()}], "Alertes activées sur un téléphone");
+}
+async function couperAlertes() {
+  const sub = await abonnementActuel();
+  if (!sub) return;
+  const endpoint = sub.endpoint;
+  await sub.unsubscribe();
+  if (await jeton()) await modifierAbonnements(l => l.filter(x => x.endpoint !== endpoint), "Alertes coupées sur un téléphone");
+}
+
 // ------------------------------------------------------------------ Parler à Novice
 // Deux façons de répondre (décision d'Antoine du 24/09) :
 //  - rapide : Gemini, appelé directement depuis ce téléphone avec la clé
@@ -1131,6 +1172,9 @@ async function vueAppli() {
     <div class="group-t">Affichage</div>
     <div class="list"><div class="set"><span>Point du soir à l'ouverture</span>${inter("optPoint", pointAuto)}</div></div>
     <div class="foot">Montré une fois après chaque nouveau calcul, puis rangé en haut de l'Accueil.</div>
+    <div class="group-t">Alertes</div>
+    <div class="list"><div class="set"><span>Notifications</span>${inter("optAlertes", !!(await abonnementActuel().catch(() => null)))}</div></div>
+    <div class="foot">Quand une de tes positions passe à Alerte ou Sortir, quand Novice achète ou vend, et quand le point du soir est prêt.</div>
     <div class="group-t">Sécurité</div>
     <div class="list">
       ${fidPossible ? `<div class="set"><span>Face ID</span>${inter("optFace", faceId)}</div>` : `<div class="set">Face ID<span class="v">indisponible ici</span></div>`}
@@ -1149,6 +1193,15 @@ async function vueAppli() {
       <div class="set">Titres analysés<span class="v">${nb(r.univers_analyse, 0)}</span></div>
     </div>`;
   $("#optPoint").onchange = e => ranger("point_auto", e.target.checked);
+  $("#optAlertes").onchange = async e => {
+    const cible = e.target, voulu = cible.checked;
+    cible.disabled = true;
+    try {
+      if (voulu) { await activerAlertes(); toast("Alertes activées."); }
+      else { await couperAlertes(); toast("Alertes coupées."); }
+    } catch (x) { cible.checked = !voulu; if (x.message !== "annulé") toast("Impossible : " + x.message + "."); }
+    cible.disabled = false;
+  };
   const f = $("#optFace");
   if (f) f.onchange = async e => {
     if (e.target.checked) {
