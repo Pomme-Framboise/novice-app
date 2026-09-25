@@ -2,8 +2,8 @@
 // vraie appli, même avec un réseau faible. Tout est demandé au réseau
 // d'abord (jamais un vieux soir ni une vieille version), la mémoire ne sert
 // que hors connexion.
-const VERSION = "novice-v2";
-const COQUILLE = ["./", "index.html", "app.css", "app.js", "manifest.json",
+const VERSION = "novice-v3";
+const COQUILLE = ["./", "index.html", "app.css?v=3", "app.js?v=3", "manifest.json",
                   "icone-192.png", "icone-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
