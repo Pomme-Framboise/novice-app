@@ -1211,6 +1211,13 @@ const REGLES_NOVICE = {seuil: 68, poids_fond: 0.6, ignorer: [], stop_atr: 4, sor
 const NOMS_FILTRES = {analystes: "aucune baisse d'objectif d'analyste sur 30 jours", presse: "pas de presse euphorique sur 5 jours"};
 function decrireRegles(r = {}) {
   const l = [];
+  if (r.fourchettes) {
+    const f = r.fourchettes;
+    l.push(`achat par fourchettes : indicateurs au moins ${f.indicateurs_min || 0} sur 100`);
+    if (f.analystes_min) l.push(`résultats et analystes au moins ${f.analystes_min}`);
+    if (f.actualite === "non_negative") l.push("actualité non négative");
+    if (f.actualite === "positive") l.push("actualité positive");
+  }
   if (r.seuil != null && r.seuil !== 68) l.push(`seuil d'achat ${r.seuil} au lieu de 68`);
   if (r.poids_fond != null && r.poids_fond !== 0.6) l.push(`fondamental ${Math.round(r.poids_fond * 100)} % et technique ${Math.round((1 - r.poids_fond) * 100)} %`);
   if ((r.ignorer || []).length) l.push(`sans ${r.ignorer.map(q => `${q} (${NOMS_Q[q] || q})`).join(", ")}`);
@@ -1274,9 +1281,17 @@ function nouvelEssai() {
   const {f, fermer} = feuille(`<h3>Nouvel essai</h3>
     <p>Change une ou plusieurs règles : l'essai tournera à côté de Novice dès le prochain calcul du soir, sans jamais le modifier.</p>
     <div class="options">
+      <label class="opt">Décision d'achat ${choix("oMode", [["score", "Score global (Novice)"], ["fourchettes", "Fourchettes par famille"]], "score")}</label>
+      <div id="blocFourchettes" hidden class="options">
+        <label class="opt">Indicateurs, au moins ${choix("oInd", [40, 50, 60, 70, 80].map(v => [v, v + " sur 100"]), 60)}</label>
+        <label class="opt">Résultats et analystes ${choix("oAna", [[0, "Non exigé"], [40, "Au moins 40"], [50, "Au moins 50"], [60, "Au moins 60"], [70, "Au moins 70"]], 50)}</label>
+        <label class="opt">Actualité ${choix("oActu", [["", "Indifférente"], ["non_negative", "Non négative"], ["positive", "Positive"]], "non_negative")}</label>
+      </div>
+      <div id="blocScore" class="options">
       <label class="opt">Seuil d'achat ${choix("oSeuil", seuils, 68)}</label>
       <label class="opt">Poids du fondamental ${choix("oPoids", [[0.4, "40 %"], [0.5, "50 %"], [0.6, "60 % (Novice)"], [0.7, "70 %"], [0.8, "80 %"]], 0.6)}</label>
       <div><div style="font-size:14.5px;margin-bottom:6px">Questions retirées</div><div class="coches">${Object.entries(NOMS_Q).map(([k, l]) => `<label><input type="checkbox" value="${k}" class="oQ"> ${k} ${l}</label>`).join("")}</div></div>
+      </div>
       <label class="opt">Stop ${choix("oStop", [[2, "2 ATR"], [3, "3 ATR"], [4, "4 ATR (Novice)"], [5, "5 ATR"], [6, "6 ATR"]], 4)}</label>
       <label class="opt">Sortie sous MM50 − ATR ${choix("oSortie", [["oui", "Oui (Novice)"], ["non", "Non"]], "oui")}</label>
       <label class="opt">Butoir ${choix("oButoir", [[63, "3 mois"], [126, "6 mois (Novice)"], [252, "12 mois"]], 126)}</label>
@@ -1285,6 +1300,10 @@ function nouvelEssai() {
     </div>
     <div class="erreur" id="err"></div>
     <button class="btn" id="ok">Lancer l'essai</button><button class="btn sec" data-annuler>Annuler</button>`);
+  f.querySelector("#oMode").onchange = e => {
+    f.querySelector("#blocFourchettes").hidden = e.target.value !== "fourchettes";
+    f.querySelector("#blocScore").hidden = e.target.value === "fourchettes";
+  };
   f.querySelector("#ok").onclick = async () => {
     const r = {seuil: Number(f.querySelector("#oSeuil").value), poids_fond: Number(f.querySelector("#oPoids").value),
                ignorer: [...f.querySelectorAll(".oQ:checked")].map(x => x.value), stop_atr: Number(f.querySelector("#oStop").value),
@@ -1292,6 +1311,12 @@ function nouvelEssai() {
                filtres: [...f.querySelectorAll(".oF:checked")].map(x => x.value)};
     // On ne garde que ce qui diffère de Novice.
     const regles = Object.fromEntries(Object.entries(r).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(REGLES_NOVICE[k])));
+    if (f.querySelector("#oMode").value === "fourchettes") {
+      // Par fourchettes : le score global, son seuil et ses poids ne servent plus.
+      delete regles.seuil; delete regles.poids_fond; delete regles.ignorer;
+      const actu = f.querySelector("#oActu").value, ana = Number(f.querySelector("#oAna").value);
+      regles.fourchettes = {indicateurs_min: Number(f.querySelector("#oInd").value), ...(ana ? {analystes_min: ana} : {}), ...(actu ? {actualite: actu} : {})};
+    }
     const err = f.querySelector("#err");
     if (!Object.keys(regles).length) return err.textContent = "Change au moins une règle : sinon, c'est Novice.";
     if (regles.ignorer && regles.ignorer.length === 6) return err.textContent = "Il faut garder au moins une question.";
@@ -1439,6 +1464,8 @@ function fiche(t) {
       <div class="row"><div class="score"><b>${nb(g.score_global, 0)}</b><span class="muted">/ 100</span></div><span class="chip ${statut === "conditions réunies" ? "in" : statut === "sous surveillance" ? "al" : "neutre"}">${esc(statut)}</span></div>
       <div class="rowmini"><span>Fondamental <b style="color:var(--ink)">${nb(g.fondamental, 0)}</b> × 0,6</span><span>Technique <b style="color:var(--ink)">${nb(g.technique, 0)}</b> × 0,4</span></div>
       <div class="over" style="font-size:12.5px;margin-top:8px">${esc(g.motif)}${statut === "sous surveillance" && s.ticker ? ` · il manque ${nb(Math.max(0, seuilDe(s) - g.score_global), 0)} points pour que Novice achète` : ""}</div></div>
+      ${g.familles ? `<div class="card"><div class="over" style="margin-bottom:6px">Ce qui a pesé dans la décision</div>${[["indicateurs", "Indicateurs"], ["analystes", "Résultats et analystes"], ["actualite", "Actualité"]].map(([k, l]) => { const f = g.familles[k] || {};
+        return `<div class="q6"><span class="l">${l}<small>${esc(f.detail || "")}</small></span><span class="chip ${f.avis === "pour" ? "in" : f.avis === "contre" ? "out" : "neutre"}">${esc(f.avis || "?")} · ${nb(f.note, 0)}</span></div>`; }).join("")}</div>` : ""}
       <div class="card">${Q.map(([k, l]) => { const q = g.questions[k] || {}; return `<div class="q6 tappable" data-why><span class="n">${k}</span><span class="l">${l}<small class="why" hidden>${esc(q.detail)}</small></span><span class="p">${nb(q.points, 0)}<span class="muted" style="font-weight:500"> / ${q.max}</span></span></div>`; }).join("")}</div>
       <div class="foot" style="margin-top:-4px">Touche une question pour lire sa justification.${lec.modele ? ` Lecture de l'actualité : ${esc(lec.modele === "claude" ? "Claude, avec recherche web" : lec.modele)}.` : ""}</div>` : ""}
     ${(() => { const p = ((D.filtres || {}).presse || {})[t], an = ((D.filtres || {}).analystes || {})[t];
