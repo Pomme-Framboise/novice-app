@@ -382,7 +382,9 @@ async function rangerSecret(nom, valeur) {
   const donnees = await crypto.subtle.encrypt({name: "AES-GCM", iv}, CLE, new TextEncoder().encode(valeur.trim()));
   await ranger(nom, {iv, donnees});
 }
-const jeton = () => lireSecret("jeton");
+// Le jeton arrive chiffré avec les données (secret NOVICE_JETON_APPLI, décision
+// d'Antoine du 07/10) ; un jeton saisi sur ce téléphone reste prioritaire.
+const jeton = async () => (await lireSecret("jeton")) || (D && D.jeton_appli) || null;
 const rangerJeton = valeur => rangerSecret("jeton", valeur);
 // Une clé gardée avant la version du 24/09 sait lire, pas chiffrer : on la
 // renouvelle avec le mot de passe, une seule fois.
@@ -557,7 +559,7 @@ function feuille(html) {
 
 async function exigerJeton() {
   if (await jeton()) return true;
-  toast("Connecte d'abord l'appli à GitHub : Accueil › Réglages › GitHub.");
+  toast("Connexion au robot absente : le jeton de l'appli n'est pas encore en place.");
   return false;
 }
 
@@ -667,10 +669,10 @@ async function vente(ticker) {
 
 async function blocGithub() {
   const el = $("#blocGithub"); if (!el) return;
-  const connecte = !!(await jeton());
+  const connecte = !!(await jeton()), local = !!(await lireSecret("jeton"));
   el.innerHTML = connecte
-    ? `<div class="set">Connexion à GitHub<span class="v up">active</span></div>
-       <div class="set" style="justify-content:center"><a href="#" id="retirerJeton">Retirer le jeton de ce téléphone</a></div>`
+    ? `<div class="set">Connexion à GitHub<span class="v up">${local ? "active" : "automatique"}</span></div>
+       ${local ? `<div class="set" style="justify-content:center"><a href="#" id="retirerJeton">Retirer le jeton de ce téléphone</a></div>` : ""}`
     : `<div style="padding:14px 16px" class="empty">Pour que l'appli puisse lancer un scan et enregistrer tes achats et ventes, crée un jeton GitHub limité :
         <ol style="padding-left:18px;margin:8px 0">
           <li>Ouvre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com › jeton à accès limité</a>.</li>
