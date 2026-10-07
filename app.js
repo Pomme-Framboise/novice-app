@@ -977,6 +977,17 @@ async function blocGemini() {
 const ROUE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
 const heureDe = s => { const d = new Date(s); return String(d.getHours()).padStart(2, "0") + "h" + String(d.getMinutes()).padStart(2, "0"); };
 const titrePoint = r => r.type === "manuel" ? `Le point de ${heureDe(r.genere_le)}` : "Le point du soir";
+// L'avis de Novice sur une position réelle (moteur : avis_position).
+const AVIS = {tient: ["Ça tient", "in"], surveiller: ["À surveiller", "al"], degrade: ["Se dégrade", "out"], sortirais: ["Je sortirais", "out"]};
+const chipAvis = a => a && AVIS[a.niveau] ? `<span class="chip ${AVIS[a.niveau][1]}">${AVIS[a.niveau][0]}</span>` : "";
+function blocAvis(a) {
+  if (!a) return "";
+  const ligne = (titre, texte) => `<div class="q6"><span class="n" style="width:74px">${titre}</span><span class="l">${esc(texte)}</span></div>`;
+  return `<div class="avis"><div class="row"><b style="font-size:15px">L'avis de Novice</b>${chipAvis(a)}</div>
+    <div style="font-size:14.5px;margin:6px 0 10px">${esc(a.conclusion)}</div>
+    ${ligne("Chiffres", a.chiffres)}${ligne("Technique", a.technique)}${ligne("Actualité", a.actualite)}
+    ${(a.sources || []).length ? `<div class="sources" style="margin-top:6px">${a.sources.slice(0, 3).map(x => `<a href="${lien(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.titre || x.url)}</a>`).join("")}</div>` : ""}</div>`;
+}
 const chipVerdict = v => `<span class="chip ${v === "Garder" ? "in" : v === "Alerte" ? "al" : "out"}">${esc(v || "?")}</span>`;
 
 // Titres « sous surveillance » : au-dessus de 55, sous le seuil d'achat.
@@ -1056,7 +1067,7 @@ function vueAccueil() {
 
     <h2>Mes actions <small data-go="actions">Tout voir</small></h2>
     <div class="list">${mes.length ? mes.map(p => { const v = p.verdict || {};
-        return `<div class="li tappable" data-go="actions"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom || p.ticker)}</b><span>${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) + " · " : ""}${esc(v.raison || "")}</span></div>${chipVerdict(v.verdict)}</div>`; }).join("")
+        return `<div class="li tappable" data-go="actions"><div class="logo">${esc(p.ticker)}</div><div class="t"><b>${esc(p.nom || p.ticker)}</b><span>${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) + " · " : ""}${esc((p.avis || {}).conclusion || v.raison || "")}</span></div>${chipAvis(p.avis) || chipVerdict(v.verdict)}</div>`; }).join("")
       : `<div class="li sans-logo"><div class="t"><span>Aucune position en cours chez Trade Republic.</span></div></div>`}</div>
 
     <h2>Portefeuille de Novice</h2>
@@ -1456,7 +1467,8 @@ function vueActions() {
       return `<div class="card" style="margin-top:14px">
         <div class="row"><div class="row" style="gap:12px;justify-content:flex-start"><div class="logo">${esc(p.ticker)}</div><div><b style="font-size:16px">${esc(p.nom || p.ticker)}</b><div class="over" style="font-size:12px">acheté ${p.prix_eur ? nb(p.prix_eur, 2) + " €" : nb(p.prix, 2)} le ${dateFr(p.date_achat)}${v.seances ? " · séance " + v.seances : ""}</div></div></div>
           <b class="${classe(v.dernier_cours / p.prix - 1)}" style="font-size:17px">${v.dernier_cours ? pct((v.dernier_cours / p.prix - 1) * 100) : "—"}</b></div>
-        <div class="verdict v-${esc(v.verdict)}"><span class="ic"></span><div><b>${esc(v.verdict || "?")}</b><span>${esc(v.raison || "")}</span></div></div>
+        <div class="verdict v-${esc(v.verdict)}"><span class="ic"></span><div><b>Règle du système : ${esc(v.verdict || "?")}</b><span>${esc(v.raison || "")}</span></div></div>
+        ${blocAvis(p.avis)}
         <div class="levels"><div><b>${nb(v.niveau_vente, 2)}</b><span>niveau de vente</span></div><div><b>${nb(v.stop, 2)}</b><span>stop 4 ATR</span></div><div><b>${pct(v.marge_avant_sortie_pct)}</b><span>marge avant sortie</span></div></div>
         <div class="row" style="margin-top:12px"><a href="#" data-fiche="${esc(p.ticker)}" style="font-size:13px">Graphique et actus</a><button class="scanbtn sec" data-vente="${esc(p.ticker)}">J'ai vendu</button></div>
       </div>`; }).join("")

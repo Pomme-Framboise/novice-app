@@ -241,3 +241,9 @@ h2 .aide{margin-right:auto}
 .options select{font:inherit;font-size:15px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 .coches{display:flex;flex-wrap:wrap;gap:6px}
 .coches label{display:flex;align-items:center;gap:6px;font-size:13.5px;background:var(--surface2);padding:6px 10px;border-radius:10px}
+
+/* L'avis de Novice sur une position réelle */
+.avis{margin-top:12px;padding:14px;border-radius:14px;background:var(--surface2)}
+.avis .q6{border-top:.5px solid var(--line)}
+.avis .q6 .n{color:var(--muted)}
+.li .t span{white-space:normal}
