@@ -427,7 +427,7 @@ const DUREES = {   // nom de l'étape sur GitHub → [ce qu'on affiche, secondes
   "Installer les bibliothèques": ["Préparation de la machine", 13],
   "Préparer (scan, collecte, actus)": ["Scan des ~870 titres et collecte", 60],
   "Lecture des actus par Claude": ["Claude lit l'actualité des titres", 400],
-  "Noter (six questions, score global)": ["Six questions, décisions de Novice", 40],
+  "Noter (six questions, score global)": ["Décisions de Novice et bac à sable", 40],
   "Publier l'appli (paquet chiffré)": ["Publication chiffrée", 10],
 };
 const NOTER_SOIR_S = 360;     // le soir, filtres de presse et Labo en plus
@@ -567,7 +567,7 @@ async function scanner() {
   if (!await exigerJeton()) return;
   if (suiviActif) return toast("Un calcul est déjà en cours : suis sa progression en bas de l'écran.");
   const {f, fermer} = feuille(`<h3>Lancer un scan maintenant ?</h3>
-    <p>Novice refait tout : cours des ~870 titres, classement, six questions lues par Claude. Compte 5 à 12 minutes.</p>
+    <p>Novice refait tout : cours des ~870 titres, classement, lecture de l'actualité et décisions par Claude. Compte 5 à 12 minutes.</p>
     <p>Si un titre réunit tes conditions, <b>Novice l'achète</b> : tout de suite au cours du moment si sa Bourse est ouverte, sinon à l'ouverture suivante. Les ventes restent décidées sur les clôtures, le soir.</p>
     <button class="btn" id="go">Lancer le scan</button><button class="btn sec" data-annuler>Annuler</button>`);
   f.querySelector("#go").onclick = async () => {
@@ -991,9 +991,9 @@ function blocAvis(a) {
 }
 const chipVerdict = v => `<span class="chip ${v === "Garder" ? "in" : v === "Alerte" ? "al" : "out"}">${esc(v || "?")}</span>`;
 
-// Titres « sous surveillance » : au-dessus de 55, sous le seuil d'achat.
-// Pour chacun : ce qui manque pour que Novice achète, et la question qui
-// coûte le plus de points.
+// Titres « sous surveillance » : ceux sur lesquels Novice attend. Avec le
+// carnet, la ligne montre la situation reconnue ; l'affichage par score
+// (seuil de 68) ne sert plus qu'aux calculs faits sans décision de Novice.
 const NOMS_Q = {Q1: "Résultats et guidance", Q2: "Potentiel analystes", Q3: "Momentum sectoriel", Q4: "Catalyseur à 90 jours", Q5: "Force relative", Q6: "Risques"};
 const seuilDe = t => { const m = /seuil (\d+)/.exec(t.motif || ""); return m ? Number(m[1]) : (t.regime_indice === "ORANGE" ? 73 : 68); };
 function pointFaible(ticker) {
@@ -1127,10 +1127,10 @@ async function pointDuSoir(force = false) {
 
     <h2>Marché</h2>
     <div class="card"><div class="climat"><span class="feu ${esc(sp)}"></span><div><b style="font-size:15px">S&amp;P 500 en régime ${esc(sp.toLowerCase())}</b>
-      <div class="note">${compte("VERT")} indices verts, ${compte("ORANGE")} orange, ${compte("ROUGE")} rouges. ${sp === "ROUGE" ? "Aucun achat possible." : sp === "ORANGE" ? "Seuil d'achat relevé à 73." : "Seuil d'achat à 68."}</div></div></div></div>
+      <div class="note">${compte("VERT")} indices verts, ${compte("ORANGE")} orange, ${compte("ROUGE")} rouges. ${sp === "ROUGE" ? "Novice n'achète pas, sauf exception qu'il justifie." : sp === "ORANGE" ? "Novice est plus exigeant avant d'acheter." : "Novice peut acheter."}</div></div></div></div>
 
     <h2>Novice</h2>
-    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>${top[0] ? `Le mieux noté, ${esc(top[0].nom)}, fait ${nb(top[0].score_global, 0)} sur 100${top[0].statut === "conditions réunies" ? "" : ", sous le seuil"}.` : "Pas de short list."}</span></div></div>`}</div>
+    <div class="list">${mv.length ? mv.join("") : `<div class="li sans-logo"><div class="t"><b>Aucun mouvement</b><span>${top[0] ? (top[0].decision ? `Sur ${esc(top[0].nom)}, le mieux noté, Novice a reconnu : ${esc(top[0].decision.situation_titre || "un cas hors carnet")}.` : `Novice n'a pas encore décidé sur ${esc(top[0].nom)}, le mieux noté.`) : "Pas de short list."}</span></div></div>`}</div>
     <div class="foot" style="margin-top:0">${b.positions_ouvertes || 0} position${(b.positions_ouvertes || 0) > 1 ? "s" : ""} en cours · gain net ${eur(gainTotal(b))}${b.operations_closes ? ` · ${b.operations_closes} opérations closes, ${pct(b.gain_net_moyen_pct)} en moyenne` : ""}</div>
 
     ${mes.length ? `<h2>Mes actions</h2><div class="list">${mes.map(p => { const v = p.verdict || {};
@@ -1304,11 +1304,41 @@ function verdictEssai(e, bn) {
   if (n < 100 || b.gain_net_moyen_pct == null || bn.gain_net_moyen_pct == null) return ["Trop tôt", ""];
   return b.gain_net_moyen_pct > bn.gain_net_moyen_pct ? ["Mieux", "mieux"] : ["Moins bien", "moins"];
 }
+// Bac à sable du carnet : la référence, trois variantes au plus et un témoin
+// jugent chaque soir les mêmes titres. Ce qui compte : l'écart moyen face à
+// l'indice des titres achetés, dix séances après. Rien à lire avant 30 achats jugés.
+const SEUIL_BAC = 30;
+function blocBacASable() {
+  const s = D.bac_a_sable || {}, vs = (s.variantes || []).filter(v => v.actif !== false), bl = s.bilan || {};
+  if (!vs.length) return "";
+  const ligne = (id, logo, nom, sous, tap) => { const b = bl[id] || {}, a = b.achats || {}, n = a.cas || 0, pret = n >= SEUIL_BAC;
+    return `<div class="li${tap ? " tappable" : ""}"${tap ? ` data-variante="${esc(id)}"` : ""}><div class="logo">${logo}</div><div class="t"><b style="white-space:normal">${esc(nom)}</b>
+      <span style="white-space:normal">${esc(sous)} · ${n + (a.en_cours || 0)} achat${n + (a.en_cours || 0) > 1 ? "s" : ""}, ${n} jugé${n > 1 ? "s" : ""}</span></div>
+      <div class="r ${pret ? classe(a.ecart_moyen) : ""}">${n ? pct(a.ecart_moyen) : "–"}<span>${pret ? "face à l'indice" : `trop tôt · ${n}/${SEUIL_BAC}`}</span></div></div>`; };
+  const lot = bl["tout-le-lot"] || {};
+  return `<div class="group-t" style="margin-top:14px">Bac à sable du carnet <button class="aide" type="button" data-aide="bac">?</button></div>
+    <div class="list">${ligne("reference", "N", "Le carnet de Novice", "La référence", false)}
+      ${vs.map((v, i) => ligne(v.id, "V" + (i + 1), v.nom, "Variante", true)).join("")}
+      ${ligne("temoin-classement", "T", "Témoin : le classement seul", "Sans jugement", false)}</div>
+    <div class="foot" style="margin-top:0">Écart moyen des titres achetés face à leur indice, dix séances après${s.lance_le ? `, depuis le ${dateFr(s.lance_le)}` : ""}.${lot.cas ? ` Tous les titres étudiés : ${pct(lot.ecart_moyen)} sur ${lot.cas} cas.` : ""}</div>`;
+}
+function ficheVariante(id) {
+  const s = D.bac_a_sable || {}, v = (s.variantes || []).find(x => x.id === id); if (!v) return;
+  const b = (s.bilan || {})[id] || {}, a = b.achats || {}, o = b.autres || {}, r = ((s.bilan || {}).reference || {}).achats || {};
+  feuille(`<h3>${esc(v.nom)}</h3>
+    <p>${esc(v.idee || "")}</p>
+    <p><b>Comment elle pèse les trois familles :</b> ${esc(v.regle || "")}</p>
+    <div class="kpi2" style="margin:14px 0 4px"><div><b>${b.decisions || 0}</b><span>décisions</span></div><div><b>${a.cas || 0} / ${SEUIL_BAC}</b><span>achats jugés</span></div>
+      <div><b class="${classe(a.ecart_moyen)}">${pct(a.ecart_moyen)}</b><span>ses achats face à l'indice</span></div><div><b class="${classe(r.ecart_moyen)}">${pct(r.ecart_moyen)}</b><span>ceux du carnet</span></div></div>
+    <p style="margin-top:10px">Titres qu'elle n'a pas achetés : ${o.cas ? `${pct(o.ecart_moyen)} face à l'indice sur ${o.cas} cas` : "pas encore jugés"}.</p>
+    <p>${(a.cas || 0) >= SEUIL_BAC ? "Assez de cas pour comparer avec le carnet." : "Trop tôt pour conclure : avant 30 achats jugés, l'écart peut venir du hasard."} Novice garde, corrige ou remplace cette variante à sa révision mensuelle.</p>
+    <button class="btn sec" data-annuler>Fermer</button>`);
+}
 function vueEssais() {
   const el = $("#nov-essais"); if (!el) return;
   const liste = D.essais || [], bn = bilanDe("novice");
-  el.innerHTML = `<div class="card" style="margin-top:14px"><div class="row"><div><b style="font-size:16px">Ce que Novice essaie</b>
-      <div class="over" style="font-size:12.5px;margin-top:2px">${liste.filter(e => e.actif !== false).length} variante${liste.length > 1 ? "s" : ""} en cours <button class="aide" type="button" data-aide="essais">?</button></div></div>
+  el.innerHTML = `${blocBacASable()}<div class="card" style="margin-top:14px"><div class="row"><div><b style="font-size:16px">Essais à règle fixe</b>
+      <div class="over" style="font-size:12.5px;margin-top:2px">${liste.filter(e => e.actif !== false).length} essai${liste.length > 1 ? "s" : ""} en cours <button class="aide" type="button" data-aide="essais">?</button></div></div>
       <button class="scanbtn" id="nouvelEssai">+ Essai</button></div></div>
     <div class="list">${liste.length ? liste.map(e => { const b = e.bilan || {}, [v, cl] = verdictEssai(e, bn);
       return `<div class="li essai tappable" data-essai="${esc(e.id)}"><div class="logo">${e.par === "Novice" ? "N" : "Toi"}</div><div class="t"><b>${esc(e.nom)}</b>
@@ -1316,6 +1346,7 @@ function vueEssais() {
       : `<div class="li sans-logo"><div class="t"><span>Les premiers essais démarrent au prochain calcul du soir.</span></div></div>`}</div>`;
   $("#nouvelEssai").onclick = nouvelEssai;
   el.querySelectorAll("[data-essai]").forEach(x => x.onclick = () => ficheEssai(x.dataset.essai));
+  el.querySelectorAll("[data-variante]").forEach(x => x.onclick = () => ficheVariante(x.dataset.variante));
 }
 async function ecrireEssais(modif, message) {
   const f = await gh("/contents/donnees/essais.json?ref=main").catch(e => { if (String(e.message).includes("404")) return null; throw e; });
@@ -1348,7 +1379,7 @@ function ficheEssai(id) {
 }
 function nouvelEssai() {
   const choix = (id, options, defaut) => `<select id="${id}">${options.map(([v, l]) => `<option value="${v}"${String(v) === String(defaut) ? " selected" : ""}>${l}</option>`).join("")}</select>`;
-  const seuils = Array.from({length: 19}, (_, i) => 60 + i).map(v => [v, v === 68 ? "68 (Novice)" : String(v)]);
+  const seuils = Array.from({length: 19}, (_, i) => 60 + i).map(v => [v, v === 68 ? "68 (ancienne méthode)" : String(v)]);
   const {f, fermer} = feuille(`<h3>Nouvel essai</h3>
     <p>Change une ou plusieurs règles : l'essai tournera à côté de Novice dès le prochain calcul du soir, sans jamais le modifier.</p>
     <div class="options">
@@ -1408,11 +1439,12 @@ function nouvelEssai() {
 // « ? » à côté du titre le plus proche les affiche à la demande.
 const AIDES = {
   ensemble: "Un indicateur ne veut rien dire seul : un titre qui monte avec une bonne actualité n'est pas le même cas qu'un titre qui monte avec une mauvaise. Pour chaque décision, on garde ce que disaient ensemble les indicateurs, les chiffres et analystes, et l'actualité. Dix séances plus tard, on compare le titre à son indice. Cette liste montre, pour chaque combinaison rencontrée au moins 5 fois, l'écart moyen face à l'indice.",
-  indicateurs: "Novice lit 25 indicateurs techniques sur chaque titre, ensemble, jamais un par un. Dix séances après chaque décision, on regarde ce que le titre a fait. Pour chaque indicateur, on compare alors les titres où il était favorable à ceux où il était défavorable : plus l'écart est grand, plus il aide à distinguer les bons achats. Novice s'en sert chaque samedi pour corriger son carnet.",
-  carnet: "Novice ne décide plus avec un score et un seuil. Il reconnaît des situations : ce que disent ensemble les indicateurs, les chiffres et les analystes, et l'actualité. C'est lui qui a écrit ce carnet. Dix séances après chaque décision, on compare le titre à son indice : un achat est juste si le titre a fait mieux que le marché. Novice ne change de décision sur un titre que s'il nomme ce qui a changé dans les indicateurs, chez les analystes ou dans l'actualité. Chaque samedi, Novice relit ses bilans et corrige son carnet.",
+  indicateurs: "Novice lit 25 indicateurs techniques sur chaque titre, ensemble, jamais un par un. Dix séances après chaque décision, on regarde ce que le titre a fait. Pour chaque indicateur, on compare alors les titres où il était favorable à ceux où il était défavorable : plus l'écart est grand, plus il aide à distinguer les bons achats. Novice s'en sert à sa révision mensuelle du carnet.",
+  carnet: "Novice ne décide plus avec un score et un seuil. Il reconnaît des situations : ce que disent ensemble les indicateurs, les chiffres et les analystes, et l'actualité. C'est lui qui a écrit ce carnet. Dix séances après chaque décision, on compare le titre à son indice : un achat est juste si le titre a fait mieux que le marché. Novice ne change de décision sur un titre que s'il nomme ce qui a changé dans les indicateurs, chez les analystes ou dans l'actualité. Le carnet est gelé un mois : Novice ne le révise qu'une fois par mois, et seulement s'il a au moins 30 décisions jugées, pour qu'on sache quelle version a produit quels résultats.",
+  bac: "On ne peut pas rejouer le passé avec l'actualité de l'époque : le mélange des trois familles ne se mesure qu'en avançant. Chaque soir, sur les mêmes titres, Novice décide donc avec son carnet et avec trois variantes au plus : trois autres façons de peser ensemble les indicateurs, les chiffres et l'actualité. Le témoin, lui, achète sans juger : autant de titres que Novice, pris en tête du classement. Si le carnet ne fait pas mieux que le témoin, le jugement de Novice n'apporte rien. Trois variantes seulement : avec dix, l'une gagnerait par hasard. Rien à conclure avant 30 achats jugés.",
   chat: "Réponse rapide en quelques secondes, à partir des données du dernier calcul. « Approfondir avec Claude » lance une analyse avec recherche web, environ 30 secondes.",
-  labo: "Novice applique tes six questions ; « technique seul » achète la short list sans elles. Il faut environ 100 opérations closes pour qu'un écart de 10 points ne soit pas dû au hasard : avant, c'est trop tôt pour conclure.",
-  essais: "Chaque essai est une variante de ta méthode : une règle changée, un indicateur ajouté ou retiré. Il achète et vend sur les mêmes titres que Novice, à 300 € par position, sans jamais modifier Novice. Verdict après ~100 opérations closes.",
+  labo: "Novice décide avec son carnet ; « technique seul » achète la short list sans juger. Il faut environ 100 opérations closes pour qu'un écart de 10 points ne soit pas dû au hasard : avant, c'est trop tôt pour conclure.",
+  essais: "Ces essais datent d'avant le carnet : chacun applique une règle fixe à l'ancien score sur 100 (seuil, poids, stop). Ils restent pour comparer. Il achète et vend sur les mêmes titres que Novice, à 300 € par position, sans jamais modifier Novice. Verdict après ~100 opérations closes.",
 };
 function aidesAuto() {
   for (const f of document.querySelectorAll(".foot:not([data-vu])")) {
@@ -1505,7 +1537,7 @@ function vueMarches() {
       ${(() => { const ok = liste.filter(t => t.statut === "conditions réunies");
         return ok.length ? `<h2>Conditions réunies <small style="cursor:default">${ok.length}</small></h2><div class="list">${ok.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || "")}</span></div>${t.decision ? chipAction(t.decision.action) : `<div class="r up">${nb(t.score_global, 0)}<span>seuil ${seuilDe(t)}</span></div>`}</div>`).join("")}</div>` : ""; })()}
       ${blocSurveillance() || (liste.some(t => t.statut === "conditions réunies") ? "" : `<div class="card"><div class="empty">Aucun titre au-dessus de 55 ce soir.</div></div>`)}
-      <div class="foot" style="margin-top:0">Classement par force relative parmi ${nb(r.univers_analyse, 0)} titres, puis six questions sur les 10 premiers. Score global = 0,6 × fondamental + 0,4 × technique.</div>
+      <div class="foot" style="margin-top:0">Classement par force relative parmi ${nb(r.univers_analyse, 0)} titres, puis décision de Novice sur les 10 premiers avec son carnet. Le score sur 100 reste affiché à titre indicatif : il ne décide plus.</div>
     </div>
     <div id="mk-act" hidden>
       <div class="list news" style="margin-top:14px">${actus.length ? actus.map(a => `<a class="li" href="${lien(a.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit"><div class="logo">${esc(a.ticker)}</div><div class="t"><span class="kind">${esc(a.source || "")}</span><b>${esc(a.titre)}</b><span>${dateFr(a.date)}</span></div></a>`).join("") : `<div class="li"><div class="empty">Pas d'actus ce soir.</div></div>`}</div>
@@ -1596,8 +1628,8 @@ function vueLabo() {
     <div id="lab-pf">
       ${(() => { const n = bn.operations_closes || 0, ecart = (bn.gain_net_moyen_pct ?? null) != null && (bt.gain_net_moyen_pct ?? null) != null ? bn.gain_net_moyen_pct - bt.gain_net_moyen_pct : null;
         const barre = (lib, v, coul) => `<div style="margin-top:10px"><div class="row" style="font-size:14px"><span>${lib}</span><b class="${classe(v)}">${pct(v)}</b></div><div class="prog"><i style="width:${v == null ? 0 : Math.min(100, Math.abs(v) * 5)}%;background:${coul}"></i></div></div>`;
-        return `<div class="card" style="margin-top:14px"><div class="row"><span class="over">Tes six questions servent-elles ? <button class="aide" type="button" data-aide="labo">?</button></span><span class="chip ${n >= 100 ? (ecart > 0 ? "in" : "out") : "neutre"}">${n >= 100 ? (ecart > 0 ? "Oui" : "Non") : "Trop tôt"}</span></div>
-          ${barre("Novice, avec les questions", bn.gain_net_moyen_pct, "var(--accent)")}${barre("Technique seul, sans elles", bt.gain_net_moyen_pct, "var(--grey)")}
+        return `<div class="card" style="margin-top:14px"><div class="row"><span class="over">Le jugement de Novice sert-il ? <button class="aide" type="button" data-aide="labo">?</button></span><span class="chip ${n >= 100 ? (ecart > 0 ? "in" : "out") : "neutre"}">${n >= 100 ? (ecart > 0 ? "Oui" : "Non") : "Trop tôt"}</span></div>
+          ${barre("Novice, avec son carnet", bn.gain_net_moyen_pct, "var(--accent)")}${barre("Technique seul, sans jugement", bt.gain_net_moyen_pct, "var(--grey)")}
           <div class="over" style="margin-top:10px;font-size:12px">Gain net moyen par opération · ${n} / 100 opérations closes</div></div>`; })()}
       <div class="card" style="margin-top:14px"><div class="row"><span class="over">Gain en euros depuis le lancement</span></div>
         ${a.dates.length > 1 ? `<svg id="courbeLabo" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:10px"></svg><div class="legend"><span><i style="background:var(--accent)"></i>Novice</span><span><i style="background:var(--grey)"></i>les autres</span></div>` : `<div class="empty" style="margin-top:10px">Les courbes apparaîtront après les premiers achats.</div>`}</div>
