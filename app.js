@@ -1227,12 +1227,12 @@ function feuillePalette(g) {
 }
 function blocBilanIndicateurs() {
   const b = D.indicateurs_bilan || {}, n = b.decisions_jugees || 0;
-  const l = Object.values(b.indicateurs || {}).filter(x => x.ecart != null && x.favorable.cas + x.defavorable.cas >= 30).sort((x, y) => y.ecart - x.ecart);
-  if (!l.length) return `<div class="group-t">Les indicateurs qui servent <button class="aide" type="button" data-aide="indicateurs">?</button></div>
-    <div class="card"><div class="row" style="font-size:14.5px"><span>Mesure en cours</span><b>${n} décision${n > 1 ? "s" : ""} jugée${n > 1 ? "s" : ""}</b></div><div class="prog"><i style="width:${Math.min(100, n / 30 * 100)}%"></i></div>
-      <div class="over" style="margin-top:8px;font-size:12.5px">Premier classement des 25 indicateurs à partir de 30 décisions jugées.</div></div>`;
-  return `<div class="group-t">Les indicateurs qui servent <button class="aide" type="button" data-aide="indicateurs">?</button></div>
-    <div class="list">${l.map(x => `<div class="li sans-logo"><div class="t"><b style="white-space:normal">${esc(x.nom)}</b><span>favorable : ${pct(x.favorable.rendement_moyen)} (${x.favorable.cas} cas) · défavorable : ${pct(x.defavorable.rendement_moyen)} (${x.defavorable.cas} cas)</span></div><div class="r ${classe(x.ecart)}">${pct(x.ecart)}<span>écart</span></div></div>`).join("")}</div>`;
+  const AVIS_F = {pour: "pour", neutre: "neutre", contre: "contre"};
+  const l = (b.combinaisons || []).filter(c => c.cas >= 5);
+  const titre = `<div class="group-t">Ce qui marche ensemble <button class="aide" type="button" data-aide="ensemble">?</button></div>`;
+  if (!l.length) return `${titre}<div class="card"><div class="row" style="font-size:14.5px"><span>Mesure en cours</span><b>${n} décision${n > 1 ? "s" : ""} jugée${n > 1 ? "s" : ""}</b></div><div class="prog"><i style="width:${Math.min(100, n / 30 * 100)}%"></i></div>
+      <div class="over" style="margin-top:8px;font-size:12.5px">Premiers résultats quand une même combinaison aura été rencontrée 5 fois.</div></div>`;
+  return `${titre}<div class="list">${l.map(c => `<div class="li sans-logo"><div class="t"><b style="white-space:normal">Indicateurs ${AVIS_F[c.familles.indicateurs] || "?"} · analystes ${AVIS_F[c.familles.analystes] || "?"} · actualité ${AVIS_F[c.familles.actualite] || "?"}</b><span>${c.cas} cas</span></div><div class="r ${classe(c.ecart_moyen_indice)}">${pct(c.ecart_moyen_indice)}<span>face à l'indice</span></div></div>`).join("")}</div>`;
 }
 
 // Le carnet de situations : la décision de Novice sur un titre ou une position.
@@ -1244,14 +1244,14 @@ function vueCarnet() {
   const el = $("#nov-carnet"); if (!el) return;
   const c = D.carnet || {}, sits = (c.situations || []).filter(s => s.actif !== false);
   if (!sits.length) { el.innerHTML = `<div class="card" style="margin-top:14px"><div class="empty">Novice n'a pas encore écrit son carnet.</div></div>`; return; }
-  const bilan = b => !b || !b.reconnue ? "pas encore rencontrée" : `rencontrée ${b.reconnue} fois${b.jugee ? ` · juste ${b.bonne} fois sur ${b.jugee}` : " · pas encore jugée"}`;
+  const bilan = b => !b || !b.reconnue ? "pas encore rencontrée" : `rencontrée ${b.reconnue} fois${b.jugee ? ` · juste ${b.bonne} fois sur ${b.jugee}${b.ecart_moyen_indice != null ? ` · ${pct(b.ecart_moyen_indice)} face à l'indice` : ""}` : " · pas encore jugée"}`;
   el.innerHTML = `<div class="card" style="margin-top:14px"><div class="row"><div><b style="font-size:16px">Le carnet de Novice</b>
       <div class="over" style="font-size:12.5px;margin-top:2px">${sits.length} situations · version ${c.version || 1}${c.revise_le ? " du " + dateFr(c.revise_le) : ""} <button class="aide" type="button" data-aide="carnet">?</button></div></div></div></div>
     ${Object.entries(TYPES_SITUATION).map(([type, lib]) => { const l = sits.filter(s => s.type === type);
       return l.length ? `<div class="group-t">${lib} · ${l.length}</div><div class="list">${l.map(s => `<div class="li sans-logo tappable" data-situation="${esc(s.id)}"><div class="t"><b style="white-space:normal">${esc(s.titre)}</b><span>${bilan(s.bilan)}</span></div><span class="chev">›</span></div>`).join("")}</div>` : ""; }).join("")}
     ${blocBilanIndicateurs()}
     ${(c.historique || []).length ? `<div class="group-t">Journal du carnet</div><div class="list">${c.historique.slice(-8).reverse().map(h => `<div class="li sans-logo"><div class="t"><b style="white-space:normal">${dateFr(h.date)} · ${esc(h.type)}${h.situation && h.situation !== "carnet" ? " : " + esc(h.situation) : ""}</b><span>${esc(h.pourquoi)}</span></div></div>`).join("")}</div>` : ""}
-    ${(D.decisions || []).length ? `<div class="group-t">Dernières décisions</div><div class="list">${D.decisions.slice(-12).reverse().map(x => `<div class="li tappable" data-fiche="${esc(x.ticker)}"><div class="logo">${esc(x.ticker)}</div><div class="t"><b>${dateFr(x.date)} · ${esc((sits.find(s => s.id === x.situation) || {}).titre || "Cas hors carnet")}</b><span>${"bonne" in x ? (x.bonne ? "Jugée juste" : "Jugée fausse") + " (" + pct(x.rendement_10_seances_pct) + " en 10 séances)" : "Pas encore jugée"}</span></div>${chipAction(x.action)}</div>`).join("")}</div>` : ""}`;
+    ${(D.decisions || []).length ? `<div class="group-t">Dernières décisions</div><div class="list">${D.decisions.slice(-12).reverse().map(x => `<div class="li tappable" data-fiche="${esc(x.ticker)}"><div class="logo">${esc(x.ticker)}</div><div class="t"><b>${dateFr(x.date)} · ${esc((sits.find(s => s.id === x.situation) || {}).titre || "Cas hors carnet")}</b><span>${"bonne" in x ? (x.bonne ? "Jugée juste" : "Jugée fausse") + " (" + pct(x.ecart_indice_pct ?? x.rendement_10_seances_pct) + " face à son indice en 10 séances)" : "Pas encore jugée"}</span></div>${chipAction(x.action)}</div>`).join("")}</div>` : ""}`;
   el.querySelectorAll("[data-situation]").forEach(x => x.onclick = () => {
     const s = sits.find(y => y.id === x.dataset.situation); if (!s) return;
     feuille(`<h3>${esc(s.titre)}</h3>
@@ -1269,7 +1269,8 @@ function blocDecision(d) {
   if (!d) return "";
   return `<div class="card"><div class="row"><b style="font-size:15px">La décision de Novice</b>${chipAction(d.action)}</div>
     <div class="over" style="margin:6px 0 8px">Situation reconnue : ${esc(d.situation_titre || "cas hors carnet")}</div>
-    <div style="font-size:14.5px;line-height:1.5">${esc(d.raisonnement || "")}</div></div>`;
+    <div style="font-size:14.5px;line-height:1.5">${esc(d.raisonnement || "")}</div>
+    ${d.ce_qui_a_change ? `<div class="over" style="margin-top:8px">Ce qui a changé depuis sa décision précédente : ${esc(d.ce_qui_a_change)}</div>` : ""}</div>`;
 }
 
 // ------------------------------------------------------------------ Essais (bac à sable)
@@ -1406,8 +1407,9 @@ function nouvelEssai() {
 // Les phrases grises d'explication sont cachées (questionnaire du 25/09) : un
 // « ? » à côté du titre le plus proche les affiche à la demande.
 const AIDES = {
+  ensemble: "Un indicateur ne veut rien dire seul : un titre qui monte avec une bonne actualité n'est pas le même cas qu'un titre qui monte avec une mauvaise. Pour chaque décision, on garde ce que disaient ensemble les indicateurs, les chiffres et analystes, et l'actualité. Dix séances plus tard, on compare le titre à son indice. Cette liste montre, pour chaque combinaison rencontrée au moins 5 fois, l'écart moyen face à l'indice.",
   indicateurs: "Novice lit 25 indicateurs techniques sur chaque titre, ensemble, jamais un par un. Dix séances après chaque décision, on regarde ce que le titre a fait. Pour chaque indicateur, on compare alors les titres où il était favorable à ceux où il était défavorable : plus l'écart est grand, plus il aide à distinguer les bons achats. Novice s'en sert chaque samedi pour corriger son carnet.",
-  carnet: "Novice ne décide plus avec un score et un seuil. Il reconnaît des situations : ce que disent ensemble les indicateurs, les chiffres et les analystes, et l'actualité. C'est lui qui a écrit ce carnet. Dix séances après chaque décision, on regarde ce que le titre a fait : la situation gagne ou perd un point. Chaque samedi, Novice relit ses bilans et corrige son carnet.",
+  carnet: "Novice ne décide plus avec un score et un seuil. Il reconnaît des situations : ce que disent ensemble les indicateurs, les chiffres et les analystes, et l'actualité. C'est lui qui a écrit ce carnet. Dix séances après chaque décision, on compare le titre à son indice : un achat est juste si le titre a fait mieux que le marché. Novice ne change de décision sur un titre que s'il nomme ce qui a changé dans les indicateurs, chez les analystes ou dans l'actualité. Chaque samedi, Novice relit ses bilans et corrige son carnet.",
   chat: "Réponse rapide en quelques secondes, à partir des données du dernier calcul. « Approfondir avec Claude » lance une analyse avec recherche web, environ 30 secondes.",
   labo: "Novice applique tes six questions ; « technique seul » achète la short list sans elles. Il faut environ 100 opérations closes pour qu'un écart de 10 points ne soit pas dû au hasard : avant, c'est trop tôt pour conclure.",
   essais: "Chaque essai est une variante de ta méthode : une règle changée, un indicateur ajouté ou retiré. Il achète et vend sur les mêmes titres que Novice, à 300 € par position, sans jamais modifier Novice. Verdict après ~100 opérations closes.",
