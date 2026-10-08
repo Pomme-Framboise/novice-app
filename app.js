@@ -828,9 +828,9 @@ function contexteNovice() {
   const j = v => JSON.stringify(v);
   return `# Dernier calcul\n${j(D.resume)}\n\n# Six questions par titre\n${j(six)}\n\n# Lecture des actus par Claude\n${j(lectures)}\n\n`
     + `# Portefeuille de Novice\n${j({lance_le: D.novice.lance_le, bilan: D.novice.bilan, positions})}\n\n# Labo (bilan par stratégie)\n${j(labo)}\n\n`
-    + `# Positions réelles d'Antoine\n${j(D.mes_positions)}`;
+    + `# Positions réelles d'Antoine\n${j(D.mes_positions)}\n\n# Carnet de situations de Novice\n${j((D.carnet || {}).situations || [])}\n\n# Dernières décisions\n${j((D.decisions || []).slice(-25))}`;
 }
-const CONSIGNE_NOVICE = `Tu es Novice, l'assistant de swing trading d'Antoine. Chaque soir, tu appliques sa méthode du scan global : régime des indices, filtre technique sur ~870 titres, six questions notées (Q1 résultats et guidance 30, Q2 potentiel analystes 20, Q3 momentum sectoriel 12, Q4 catalyseur 15, Q5 force relative 13, Q6 risques 10), score global = 0,6 × fondamental + 0,4 × technique. Achat à 68 et plus (73 en régime orange), aucun en rouge ; « sous surveillance » entre 55 et le seuil. 300 € par position, 20 positions au plus. Sortie : stop 4 ATR, deux clôtures sous MM50 − ATR, butoir 6 mois. Novice achète aussi après un scan lancé à la demande. Tu gères aussi le Labo (stratégies comparées) et tu surveilles les vraies positions d'Antoine.
+const CONSIGNE_NOVICE = `Tu es Novice, l'assistant de swing trading d'Antoine. Chaque soir, tu scannes environ 870 titres (régime des indices, filtre technique, classement par force relative), puis tu décides sur les meilleurs avec ton carnet de situations : tu reconnais ce que disent ensemble les indicateurs, les chiffres et les analystes, et l'actualité, et tu décides d'acheter, d'attendre ou de ne pas y aller. Pas de score couperet : le score sur 100 et les six questions restent affichés à titre indicatif. 300 € par position, 20 positions au plus. Tu juges aussi chaque soir si tu gardes ou si tu sors de tes positions ; un stop de sécurité à 4 ATR et un butoir de 6 mois restent en place. Ton carnet et tes dernières décisions sont dans les données. Tu gères aussi le Labo et les essais (variantes comparées) et tu donnes ton avis sur les vraies positions d'Antoine.
 
 Règles de réponse :
 - Réponds uniquement à partir des données ci-dessous. N'invente rien. Si elles ne permettent pas de répondre (actualité récente, information absente), dis-le en une phrase et indique qu'Antoine peut toucher « Approfondir avec Claude » pour une recherche sur le web.
@@ -986,6 +986,7 @@ function blocAvis(a) {
   return `<div class="avis"><div class="row"><b style="font-size:15px">L'avis de Novice</b>${chipAvis(a)}</div>
     <div style="font-size:14.5px;margin:6px 0 10px">${esc(a.conclusion)}</div>
     ${ligne("Chiffres", a.chiffres)}${ligne("Technique", a.technique)}${ligne("Actualité", a.actualite)}
+    ${a.situation ? ligne("Carnet", `${a.situation} : ${a.conseil === "sortir" ? "Novice sortirait" : "Novice garderait"}. ${a.raisonnement || ""}`) : ""}
     ${(a.sources || []).length ? `<div class="sources" style="margin-top:6px">${a.sources.slice(0, 3).map(x => `<a href="${lien(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.titre || x.url)}</a>`).join("")}</div>` : ""}</div>`;
 }
 const chipVerdict = v => `<span class="chip ${v === "Garder" ? "in" : v === "Alerte" ? "al" : "out"}">${esc(v || "?")}</span>`;
@@ -1007,6 +1008,8 @@ function surveillance() {
     .sort((a, b) => (b.score_global || 0) - (a.score_global || 0));
 }
 function ligneSurveillance(t) {
+  if (t.decision) return `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b>
+    <span>${esc(t.decision.situation_titre || "")}</span></div>${chipAction(t.decision.action)}</div>`;
   const seuil = seuilDe(t), manque = Math.max(0, seuil - (t.score_global || 0)), pf = pointFaible(t.ticker);
   return `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b>
     <span>il manque ${nb(manque, 0)} point${manque >= 1.5 ? "s" : ""}${pf ? ` · point faible : ${NOMS_Q[pf.k] || pf.k} ${nb(pf.q.points, 0)}/${pf.q.max}` : ""}</span>
@@ -1015,7 +1018,7 @@ function ligneSurveillance(t) {
 }
 const blocSurveillance = (titre = "En surveillance") => { const l = surveillance();
   return l.length ? `<h2>${titre} <small style="cursor:default">${l.length} titre${l.length > 1 ? "s" : ""}</small></h2><div class="list">${l.map(ligneSurveillance).join("")}</div>
-    <div class="foot" style="margin-top:0">Au-dessus de 55, sous le seuil d'achat. Novice les achète dès qu'ils le franchissent.</div>` : ""; };
+    <div class="foot" style="margin-top:0">Titres qui intéressent Novice mais où il manque quelque chose : il attend. Touche un titre pour lire son raisonnement.</div>` : ""; };
 
 // Mouvements de Novice décidés par le dernier calcul.
 function mouvements() {
@@ -1035,14 +1038,14 @@ function carteDuJour(r, genere) {
   const nov = r.novice || {}, pos = D.novice.positions || [];
   const trouve = t => pos.find(x => x.ticker === t && x.etat !== "vendue") || {};
   const achats = [...(nov.achats_maintenant || []), ...(nov.achats_demain || [])].map(t => { const p = trouve(t);
-    return {t, texte: p.prix_entree ? `acheté ${nb(p.prix_entree, 2)} le ${dateFr(p.date_entree)} · score ${nb(p.score_global, 0)}` : `achat à l'ouverture · score ${nb(p.score_global, 0)}`, type: "achat"}; });
-  const ventes = (nov.ventes_demain || []).map(t => ({t, texte: "deux clôtures sous le niveau de vente", type: "vente"}));
+    return {t, texte: p.prix_entree ? `acheté ${nb(p.prix_entree, 2)} le ${dateFr(p.date_entree)} · ${esc(p.situation || "score " + nb(p.score_global, 0))}` : `achat à l'ouverture · ${esc(p.situation || "score " + nb(p.score_global, 0))}`, type: "achat"}; });
+  const ventes = (nov.ventes_demain || []).map(t => ({t, texte: esc(trouve(t).motif || "décision de Novice"), type: "vente"}));
   const tout = [...achats, ...ventes], surv = surveillance();
   const titre = !tout.length ? "Aucun achat, aucune vente"
     : tout.length === 1 ? `Novice ${tout[0].type === "achat" ? "achète" : "vend"} ${esc(nomDe(tout[0].t))}`
     : `${achats.length} achat${achats.length > 1 ? "s" : ""}, ${ventes.length} vente${ventes.length > 1 ? "s" : ""}`;
   const lignes = tout.length ? tout.map(x => `<div class="ligne tappable" data-fiche="${esc(x.t)}"><div class="rond">${esc(x.t)}</div><div><b>${esc(nomDe(x.t))}</b><span>${x.texte}</span></div><span class="tag${x.type === "vente" ? " vente" : ""}">${x.type === "achat" ? "Achat" : "Vente"}</span></div>`).join("")
-    : surv[0] ? `<div class="ligne tappable" data-fiche="${esc(surv[0].ticker)}"><div class="rond">${esc(surv[0].ticker)}</div><div><b>Le plus proche : ${esc(surv[0].nom)}</b><span>${nb(surv[0].score_global, 0)} pour un seuil de ${seuilDe(surv[0])}</span></div></div>` : "";
+    : surv[0] ? `<div class="ligne tappable" data-fiche="${esc(surv[0].ticker)}"><div class="rond">${esc(surv[0].ticker)}</div><div><b>${surv[0].decision ? "Il attend sur" : "Le plus proche :"} ${esc(surv[0].nom)}</b><span>${surv[0].decision ? esc(surv[0].decision.situation_titre || "") : `${nb(surv[0].score_global, 0)} pour un seuil de ${seuilDe(surv[0])}`}</span></div></div>` : "";
   return `<div class="jour">
     <div class="over">${r.type === "manuel" ? "Scan" : "Calcul du soir"} du ${dateFr(r.genere_le)} à ${heureDe(r.genere_le)}${r.provisoire ? " · en séance" : ""}</div>
     <h3>${titre}</h3>${lignes}
@@ -1154,7 +1157,7 @@ function vueNovice() {
     <div class="hd"><div class="row" style="gap:14px;justify-content:flex-start"><div class="avatar lg">${MARQUE()}</div><div><h1>Novice</h1><div class="over">Ta méthode, appliquée chaque soir</div></div></div>
       <button class="gear" data-open="regles" aria-label="Règles de Novice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Règles</button>
     </div>
-    <div style="padding:0 16px"><div class="seg"><button class="on" data-s="nov-apercu">Aperçu</button><button data-s="nov-essais">Essais</button></div></div>
+    <div style="padding:0 16px"><div class="seg"><button class="on" data-s="nov-apercu">Aperçu</button><button data-s="nov-carnet">Carnet</button><button data-s="nov-essais">Essais</button></div></div>
     <div id="nov-apercu">
       <div class="card" style="margin-top:14px"><div class="over">Pose ta question à Novice <button class="aide" type="button" data-aide="chat">?</button></div>
         <div class="msgs" id="msgs"></div>
@@ -1174,8 +1177,10 @@ function vueNovice() {
         <div class="over" style="margin-top:6px;font-size:12px">${b.operations_closes || 0} / 100 opérations closes avant de juger</div>
       </div>
     </div>
+    <div id="nov-carnet" hidden></div>
     <div id="nov-essais" hidden></div>`;
-  segments($("#v-novice"), ["nov-apercu", "nov-essais"]);
+  segments($("#v-novice"), ["nov-apercu", "nov-carnet", "nov-essais"]);
+  vueCarnet();
   vueEssais();
   brancherConversation();
 
@@ -1193,13 +1198,49 @@ function vueNovice() {
     <div class="group-t">Six questions · fondamental sur 100</div>
     <div class="list">${regle("Q1 Résultats et guidance", "30 pts") + regle("Q2 Potentiel analystes (plein à 12 %)", "20 pts") + regle("Q3 Momentum sectoriel", "12 pts") + regle("Q4 Catalyseur à 90 jours", "15 pts") + regle("Q5 Force relative", "13 pts") + regle("Q6 Risques", "10 pts")}</div>
     <div class="group-t">Décision</div>
-    <div class="list">${regle("Poids fondamental / technique", "60 / 40") + regle("Seuil d'achat", "68") + regle("Seuil en régime orange", "73") + regle("Écarter si résultats sous", "7 séances") + regle("Positions maximum", "20 × 300 €")}</div>
+    <div class="list">${regle("Qui décide", "le carnet de Novice") + regle("Ce qu'il pèse", "indicateurs, chiffres, actualité") + regle("Score sur 100", "indicatif") + regle("Écarter si résultats sous", "7 séances") + regle("Positions maximum", "20 × 300 €")}</div>
     <div class="group-t">Sortie</div>
-    <div class="list">${regle("Stop posé à l'achat", "4 × ATR14") + regle("Niveau de vente", "MM50 − 1 ATR") + regle("Clôtures sous le niveau", "2") + regle("Butoir", "6 mois")}</div>
+    <div class="list">${regle("Qui décide", "le carnet, chaque soir") + regle("Stop de sécurité", "4 × ATR14") + regle("Butoir", "6 mois")}</div>
     <div class="group-t">Moment de l'achat</div>
     <div class="list">${regle("Calcul du soir", "ouverture suivante") + regle("Scan lancé en séance", "cours du moment") + regle("Scan hors séance", "ouverture suivante")}</div>
     <div class="group-t">Hypothèses de coût</div>
     <div class="list">${regle("Frais Trade Republic", "1 € + 1 €") + regle("Écart achat / vente", "0,1 % par côté") + regle("Change", "cours du jour")}</div>`;
+}
+
+// Le carnet de situations : la décision de Novice sur un titre ou une position.
+const ACTIONS = {acheter: ["J'achète", "in"], attendre: ["J'attends", "al"], eviter: ["Je n'y vais pas", "neutre"],
+                 garder: ["Je garde", "in"], sortir: ["Je sors", "out"]};
+const chipAction = a => ACTIONS[a] ? `<span class="chip ${ACTIONS[a][1]}">${ACTIONS[a][0]}</span>` : "";
+const TYPES_SITUATION = {achat: "J'achète", attente: "J'attends", evitement: "Je n'y vais pas", conservation: "Je garde", sortie: "Je sors"};
+function vueCarnet() {
+  const el = $("#nov-carnet"); if (!el) return;
+  const c = D.carnet || {}, sits = (c.situations || []).filter(s => s.actif !== false);
+  if (!sits.length) { el.innerHTML = `<div class="card" style="margin-top:14px"><div class="empty">Novice n'a pas encore écrit son carnet.</div></div>`; return; }
+  const bilan = b => !b || !b.reconnue ? "pas encore rencontrée" : `rencontrée ${b.reconnue} fois${b.jugee ? ` · juste ${b.bonne} fois sur ${b.jugee}` : " · pas encore jugée"}`;
+  el.innerHTML = `<div class="card" style="margin-top:14px"><div class="row"><div><b style="font-size:16px">Le carnet de Novice</b>
+      <div class="over" style="font-size:12.5px;margin-top:2px">${sits.length} situations · version ${c.version || 1}${c.revise_le ? " du " + dateFr(c.revise_le) : ""} <button class="aide" type="button" data-aide="carnet">?</button></div></div></div></div>
+    ${Object.entries(TYPES_SITUATION).map(([type, lib]) => { const l = sits.filter(s => s.type === type);
+      return l.length ? `<div class="group-t">${lib} · ${l.length}</div><div class="list">${l.map(s => `<div class="li sans-logo tappable" data-situation="${esc(s.id)}"><div class="t"><b style="white-space:normal">${esc(s.titre)}</b><span>${bilan(s.bilan)}</span></div><span class="chev">›</span></div>`).join("")}</div>` : ""; }).join("")}
+    ${(c.historique || []).length ? `<div class="group-t">Journal du carnet</div><div class="list">${c.historique.slice(-8).reverse().map(h => `<div class="li sans-logo"><div class="t"><b style="white-space:normal">${dateFr(h.date)} · ${esc(h.type)}${h.situation && h.situation !== "carnet" ? " : " + esc(h.situation) : ""}</b><span>${esc(h.pourquoi)}</span></div></div>`).join("")}</div>` : ""}
+    ${(D.decisions || []).length ? `<div class="group-t">Dernières décisions</div><div class="list">${D.decisions.slice(-12).reverse().map(x => `<div class="li tappable" data-fiche="${esc(x.ticker)}"><div class="logo">${esc(x.ticker)}</div><div class="t"><b>${dateFr(x.date)} · ${esc((sits.find(s => s.id === x.situation) || {}).titre || "Cas hors carnet")}</b><span>${"bonne" in x ? (x.bonne ? "Jugée juste" : "Jugée fausse") + " (" + pct(x.rendement_10_seances_pct) + " en 10 séances)" : "Pas encore jugée"}</span></div>${chipAction(x.action)}</div>`).join("")}</div>` : ""}`;
+  el.querySelectorAll("[data-situation]").forEach(x => x.onclick = () => {
+    const s = sits.find(y => y.id === x.dataset.situation); if (!s) return;
+    feuille(`<h3>${esc(s.titre)}</h3>
+      <p><b>Indicateurs.</b> ${esc(s.quand.indicateurs)}</p>
+      <p><b>Chiffres et analystes.</b> ${esc(s.quand.chiffres_et_analystes)}</p>
+      <p><b>Actualité.</b> ${esc(s.quand.actualite)}</p>
+      <p style="color:var(--ink);font-size:15.5px;margin-top:12px"><b>${esc(s.decision)}</b></p>
+      <p>${esc(s.pourquoi || "")}</p>
+      <p style="margin-top:10px">Bilan : ${bilan(s.bilan)}.</p>
+      <button class="btn sec" data-annuler>Fermer</button>`);
+  });
+}
+// Bloc « décision de Novice » d'une fiche ou d'une liste.
+function blocDecision(d) {
+  if (!d) return "";
+  return `<div class="card"><div class="row"><b style="font-size:15px">La décision de Novice</b>${chipAction(d.action)}</div>
+    <div class="over" style="margin:6px 0 8px">Situation reconnue : ${esc(d.situation_titre || "cas hors carnet")}</div>
+    <div style="font-size:14.5px;line-height:1.5">${esc(d.raisonnement || "")}</div></div>`;
 }
 
 // ------------------------------------------------------------------ Essais (bac à sable)
@@ -1336,6 +1377,7 @@ function nouvelEssai() {
 // Les phrases grises d'explication sont cachées (questionnaire du 25/09) : un
 // « ? » à côté du titre le plus proche les affiche à la demande.
 const AIDES = {
+  carnet: "Novice ne décide plus avec un score et un seuil. Il reconnaît des situations : ce que disent ensemble les indicateurs, les chiffres et les analystes, et l'actualité. C'est lui qui a écrit ce carnet. Dix séances après chaque décision, on regarde ce que le titre a fait : la situation gagne ou perd un point. Chaque samedi, Novice relit ses bilans et corrige son carnet.",
   chat: "Réponse rapide en quelques secondes, à partir des données du dernier calcul. « Approfondir avec Claude » lance une analyse avec recherche web, environ 30 secondes.",
   labo: "Novice applique tes six questions ; « technique seul » achète la short list sans elles. Il faut environ 100 opérations closes pour qu'un écart de 10 points ne soit pas dû au hasard : avant, c'est trop tôt pour conclure.",
   essais: "Chaque essai est une variante de ta méthode : une règle changée, un indicateur ajouté ou retiré. Il achète et vend sur les mêmes titres que Novice, à 300 € par position, sans jamais modifier Novice. Verdict après ~100 opérations closes.",
@@ -1429,7 +1471,7 @@ function vueMarches() {
       <div class="card" style="margin-top:14px"><div class="climat"><span class="feu ${esc(dominant)}"></span><div><b style="font-size:15px">S&amp;P 500 en régime ${esc(dominant.toLowerCase())}</b>
         <div class="over" style="font-size:12.5px">Tous indices : ${compte("VERT")} verts, ${compte("ORANGE")} orange, ${compte("ROUGE")} rouges. Seuil d'achat à 73 en orange, aucun achat en rouge.</div></div></div></div>
       ${(() => { const ok = liste.filter(t => t.statut === "conditions réunies");
-        return ok.length ? `<h2>Conditions réunies <small style="cursor:default">${ok.length}</small></h2><div class="list">${ok.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || "")}</span></div><div class="r up">${nb(t.score_global, 0)}<span>seuil ${seuilDe(t)}</span></div></div>`).join("")}</div>` : ""; })()}
+        return ok.length ? `<h2>Conditions réunies <small style="cursor:default">${ok.length}</small></h2><div class="list">${ok.map(t => `<div class="li tappable" data-fiche="${esc(t.ticker)}"><div class="logo">${esc(t.ticker)}</div><div class="t"><b>${esc(t.nom)}</b><span>${esc(t.motif || "")}</span></div>${t.decision ? chipAction(t.decision.action) : `<div class="r up">${nb(t.score_global, 0)}<span>seuil ${seuilDe(t)}</span></div>`}</div>`).join("")}</div>` : ""; })()}
       ${blocSurveillance() || (liste.some(t => t.statut === "conditions réunies") ? "" : `<div class="card"><div class="empty">Aucun titre au-dessus de 55 ce soir.</div></div>`)}
       <div class="foot" style="margin-top:0">Classement par force relative parmi ${nb(r.univers_analyse, 0)} titres, puis six questions sur les 10 premiers. Score global = 0,6 × fondamental + 0,4 × technique.</div>
     </div>
@@ -1460,7 +1502,8 @@ function fiche(t) {
       <div class="row"><div><div class="big" style="font-size:32px">${der ? nb(der[1], 2) : "—"} <span style="font-size:15px" class="muted">${esc(s.devise || "")}</span></div><div style="font-size:14px;margin-top:4px"><b class="${classe(varJ)}">${pct(varJ)}</b> <span class="muted">dernière séance</span></div></div>${pos ? `<span class="pill">Novice · ${esc(pos.etat)}</span>` : ""}</div>
       ${cours.length > 1 ? `<svg id="courbeFiche" viewBox="0 0 320 150" width="100%" height="150" style="display:block;margin-top:12px"></svg><div class="legend"><span><i style="background:var(--accent)"></i>Cours</span><span><i style="background:var(--warn)"></i>Niveau de vente (MM50 − ATR)</span></div>` : ""}
     </div>
-    ${g ? `<h2>Score global</h2><div class="card">
+    ${g && g.decision ? blocDecision(g.decision) : ""}
+    ${g ? `<h2>${g.decision ? "Les chiffres du dossier" : "Score global"}</h2><div class="card">
       <div class="row"><div class="score"><b>${nb(g.score_global, 0)}</b><span class="muted">/ 100</span></div><span class="chip ${statut === "conditions réunies" ? "in" : statut === "sous surveillance" ? "al" : "neutre"}">${esc(statut)}</span></div>
       <div class="rowmini"><span>Fondamental <b style="color:var(--ink)">${nb(g.fondamental, 0)}</b> × 0,6</span><span>Technique <b style="color:var(--ink)">${nb(g.technique, 0)}</b> × 0,4</span></div>
       <div class="over" style="font-size:12.5px;margin-top:8px">${esc(g.motif)}${statut === "sous surveillance" && s.ticker ? ` · il manque ${nb(Math.max(0, seuilDe(s) - g.score_global), 0)} points pour que Novice achète` : ""}</div></div>
