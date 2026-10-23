@@ -594,19 +594,37 @@ async function achat() {
   const suggestions = [...new Set([...(R().short_list || []).map(t => t.ticker), ...(D.novice.positions || []).map(p => p.ticker)])];
   const {f, fermer} = feuille(`<h3>J'ai acheté</h3>
     <p>Novice calculera ton stop, ton niveau de vente et te donnera un verdict chaque soir.</p>
-    <label class="champ"><span>Action (code Yahoo : ANET, AIR.PA, RHM.DE…)</span><input id="tk" list="tks" autocapitalize="characters" autocomplete="off"><datalist id="tks">${suggestions.map(t => `<option value="${esc(t)}">${esc(nomDe(t))}</option>`).join("")}</datalist></label>
-    <label class="champ"><span>Nom (facultatif)</span><input id="nm"></label>
+    <label class="champ"><span>Action : tape son nom (Airbus, Nvidia…) ou son code</span><input id="cherche" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Nom de l'entreprise"></label>
+    <div class="list" id="resultats" style="margin-top:6px"></div>
+    <input type="hidden" id="tk"><input type="hidden" id="nm">
     <div class="champs2"><label class="champ"><span>Date d'achat</span><input id="dt" type="date" value="${aujourdhui()}"></label>
       <label class="champ"><span>Montant (€)</span><input id="mt" inputmode="decimal" value="300"></label></div>
     <label class="champ"><span>Prix payé par action, en €, tel qu'affiché par Trade Republic</span><input id="px" inputmode="decimal"></label>
     <div class="erreur" id="err"></div>
     <button class="btn" id="ok">Enregistrer</button><button class="btn sec" data-annuler>Annuler</button>`);
-  f.querySelector("#tk").oninput = e => { const t = e.target.value.trim().toUpperCase(); if (!f.querySelector("#nm").value && nomDe(t) !== t) f.querySelector("#nm").value = nomDe(t); };
+  const champ = f.querySelector("#cherche"), zone = f.querySelector("#resultats");
+  const choisir = (ticker, nom) => {
+    f.querySelector("#tk").value = ticker; f.querySelector("#nm").value = nom;
+    champ.value = `${nom} (${ticker})`; zone.innerHTML = "";
+  };
+  champ.oninput = () => {
+    f.querySelector("#tk").value = ""; f.querySelector("#nm").value = "";
+    const q = champ.value.trim();
+    const l = q.length < 2 ? suggestions.map(t => [t, nomDe(t), placeDe(t)[0]]).slice(0, 6) : chercherTitres(q);
+    const code = q.toUpperCase().replace(/\s/g, "");
+    // Code libre seulement si rien n'est trouvé : un nom tapé n'est pas un code.
+    const libre = !l.length && /^[A-Z0-9^.\-]{1,15}$/.test(code);
+    zone.innerHTML = l.map(([t, n, p]) => `<div class="li tappable" data-t="${esc(t)}" data-n="${esc(n)}"><div class="logo">${esc(t)}</div><div class="t"><b style="white-space:normal">${esc(n)}</b><span>${esc(t)} · ${esc(p === "US" ? "New York" : placeDe(t)[0])}</span></div></div>`).join("")
+      + (libre && q.length >= 1 ? `<div class="li tappable" data-t="${esc(code)}" data-n="${esc(code)}"><div class="t"><b>Utiliser le code ${esc(code)}</b><span>Seulement si c'est bien son code Yahoo (exemple : SAF.PA)</span></div></div>` : "")
+      + (!l.length && !libre ? `<div class="li sans-logo"><div class="t"><span>Aucun titre trouvé. Essaie un autre mot, ou tape son code Yahoo (exemple : SAF.PA).</span></div></div>` : "");
+    zone.querySelectorAll("[data-t]").forEach(x => x.onclick = () => choisir(x.dataset.t, x.dataset.n));
+  };
+  champ.oninput();
   f.querySelector("#ok").onclick = async () => {
     const ticker = f.querySelector("#tk").value.trim().toUpperCase(), prix = nombre(f.querySelector("#px").value),
           montant = nombre(f.querySelector("#mt").value), date = f.querySelector("#dt").value;
     const err = f.querySelector("#err");
-    if (!/^[A-Z0-9^.\-]{1,15}$/.test(ticker)) return err.textContent = "Code de l'action invalide.";
+    if (!/^[A-Z0-9^.\-]{1,15}$/.test(ticker)) return err.textContent = "Choisis l'action dans la liste.";
     if (!(prix > 0) || !(montant > 0) || !date) return err.textContent = "Prix, montant et date sont obligatoires.";
     const [place, devise] = placeDe(ticker);
     // Prix en euros : converti par le robot au change du jour d'achat pour les
@@ -625,6 +643,48 @@ async function achat() {
       toast(`${ticker} enregistré. Verdict dans 2 à 3 minutes.`);
       suivre("publier.yml", depuis, "Calcul de tes niveaux");
     } catch (e) { err.textContent = e.message; f.querySelector("#ok").disabled = false; f.querySelector("#ok").textContent = "Enregistrer"; }
+  };
+}
+
+// Recherche d'un titre par son nom ou son code, sans tenir compte des accents
+// ni des majuscules : univers de Novice (~870 titres) et titres déjà connus.
+const sansAccent = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function chercherTitres(q) {
+  const m = sansAccent(q).trim(), code = q.trim().toUpperCase();
+  const connus = new Map((D.titres || []).map(x => [x[0], x]));
+  for (const p of [...(R().short_list || []), ...(D.novice.positions || []), ...(D.mes_positions.ouvertes || [])])
+    if (!connus.has(p.ticker)) connus.set(p.ticker, [p.ticker, p.nom || p.ticker, p.place || placeDe(p.ticker)[0]]);
+  const serre = s => sansAccent(s).replace(/[^a-z0-9]/g, ""), ms = serre(q);   // « loreal » trouve « L'Oréal »
+  const note = ([t, n]) => t === code ? 0 : t.startsWith(code) ? 1 : sansAccent(n).startsWith(m) ? 2
+    : sansAccent(n).split(/[\s,.\-&']+/).some(w => w.startsWith(m)) ? 3 : ms && serre(n).includes(ms) ? 4 : 9;
+  return [...connus.values()].map(x => [x, note(x)]).filter(([, s]) => s < 9).sort((a, b) => a[1] - b[1]).slice(0, 8).map(([x]) => x);
+}
+
+// Supprimer une position saisie par erreur (demande d'Antoine du 23/10).
+// Ce n'est pas une vente : rien n'entre dans « Mes ventes », et la synchro
+// du journal du Drive retire la ligne au lieu de la réimporter.
+async function supprimer(ticker) {
+  if (!await exigerJeton()) return;
+  const p = (D.mes_positions.ouvertes || []).find(x => x.ticker === ticker); if (!p) return;
+  const {f, fermer} = feuille(`<h3>Supprimer ${esc(p.nom || ticker)} ?</h3>
+    <p>À utiliser pour une erreur de saisie : la position disparaît, sans compter comme une vente. Si tu as vraiment vendu, utilise plutôt « J'ai vendu ».</p>
+    <div class="erreur" id="err"></div>
+    <button class="btn" id="ok">Supprimer</button><button class="btn sec" data-annuler>Annuler</button>`);
+  f.querySelector("#ok").onclick = async () => {
+    f.querySelector("#ok").disabled = true;
+    try {
+      const {sha, mes} = await lireMesPositions();
+      const pos = (mes.ouvertes || []).find(x => x.ticker === ticker);
+      if (!pos) throw new Error("position introuvable, recharge l'appli");
+      mes.ouvertes = mes.ouvertes.filter(x => x.ticker !== ticker);
+      mes.supprimees = [...(mes.supprimees || []), {ticker, date_achat: pos.date_achat, supprimee_le: aujourdhui()}];
+      const depuis = new Date(Date.now() - 5000);
+      await ecrireMesPositions(mes, sha, `Position ${ticker} supprimée depuis l'appli (erreur de saisie)`);
+      fermer();
+      D.mes_positions = {...D.mes_positions, ouvertes: mes.ouvertes}; vueActions(); vueAccueil();
+      toast(`${ticker} supprimé.`);
+      suivre("publier.yml", depuis, "Mise à jour de tes positions");
+    } catch (e) { f.querySelector("#err").textContent = e.message; f.querySelector("#ok").disabled = false; }
   };
 }
 
@@ -1596,6 +1656,7 @@ function vueActions() {
   setTimeout(() => {
     const b = $("#btnAchat"); if (b) b.onclick = achat;
     $$("[data-vente]").forEach(x => x.onclick = () => vente(x.dataset.vente));
+    $$("[data-supprimer]").forEach(x => x.onclick = ev => { ev.preventDefault(); supprimer(x.dataset.supprimer); });
   });
   $("#v-actions").innerHTML = `
     <div class="hd"><div><div class="over">Trade Republic · réel</div><h1>Mes actions</h1></div><button class="scanbtn" id="btnAchat">+ Achat</button></div>
@@ -1607,6 +1668,7 @@ function vueActions() {
         ${blocAvis(p.avis)}
         <div class="levels"><div><b>${nb(v.niveau_vente, 2)}</b><span>niveau de vente</span></div><div><b>${nb(v.stop, 2)}</b><span>stop 4 ATR</span></div><div><b>${pct(v.marge_avant_sortie_pct)}</b><span>marge avant sortie</span></div></div>
         <div class="row" style="margin-top:12px"><a href="#" data-fiche="${esc(p.ticker)}" style="font-size:13px">Graphique et actus</a><button class="scanbtn sec" data-vente="${esc(p.ticker)}">J'ai vendu</button></div>
+        <div style="text-align:center;margin-top:10px"><a href="#" data-supprimer="${esc(p.ticker)}" style="font-size:12.5px;color:var(--muted)">Supprimer (erreur de saisie)</a></div>
       </div>`; }).join("")
       : `<div class="card" style="margin-top:14px"><div class="empty">Aucune position en cours. Quand tu achètes chez Trade Republic, touche <b>+ Achat</b> : Novice calculera ton stop, ton niveau de vente et te donnera un verdict chaque soir.</div></div>`}
     <h2>Mes ventes</h2>
